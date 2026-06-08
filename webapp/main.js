@@ -1,4 +1,4 @@
-const map = L.map('map').setView([41.902, 12.496], 14);
+const map = L.map('map').setView([45.54, 9.44], 14);
 L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',{maxZoom:19,attribution:'© OpenStreetMap contributors'}).addTo(map);
 
 let cabinLayer, membersLayer, selectedLayer, podLayer;
@@ -27,7 +27,7 @@ function loadData(){
       }).addTo(map);
 
       populateList(cabins.features);
-      map.fitBounds(cabinLayer.getBounds());
+      // map.fitBounds(cabinLayer.getBounds());  // Commentato per mantenere vista su Vaprio d'Adda
     })
 }
 
@@ -76,7 +76,7 @@ function highlightMembers(features){
   membersLayer.addData(features.map(f=>({type:'Feature',geometry:f.geometry,properties:f.properties}))).addTo(map);
 }
 
-loadData();
+// loadData();  // Commentato per nascondere dati di Roma - la mappa rimane su Vaprio d'Adda
 
 // POD search: call backend /api/pod-search using map center and given radius
 async function podSearch(){

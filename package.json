@@ -5,7 +5,8 @@
   "description": "Backend proxy for GSE cabina primaria map queries.",
   "main": "server.js",
   "scripts": {
-    "start": "node server.js"
+    "start": "node server.js",
+    "test": "node --check server.js"
   },
   "dependencies": {
     "cors": "^2.8.5",

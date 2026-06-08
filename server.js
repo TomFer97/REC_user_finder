@@ -148,12 +148,30 @@ app.get('/api/area', async (req, res) => {
     const code = req.query.code;
     if (!code) return res.status(400).json({ error: 'Parametro code obbligatorio' });
     
-    // Use local mock data for now
-    const areasData = require('./webapp/data/areas.json');
-    const data = areasData[code];
+    // Query GSE feature service for AC by COD_AC
+    const serviceUrl = allowedServices.ac_comuni_21;
+    const queryUrl = `${serviceUrl}/query?where=COD_AC='${encodeURIComponent(code)}'&outFields=*&returnGeometry=true&f=json`;
     
-    if (!data) return res.status(404).json({ error: `Area con codice ${code} non trovata` });
-    res.json(data);
+    const response = await fetch(queryUrl);
+    if (!response.ok) throw new Error(`GSE service error: ${response.status}`);
+    const data = await response.json();
+    
+    if (data.error) throw new Error(`GSE query error: ${data.error.message}`);
+    if (!data.features || !data.features.length) {
+      return res.status(404).json({ error: `AC con codice ${code} non trovato nel GSE` });
+    }
+    
+    // Convert ArcGIS feature to GeoJSON FeatureCollection
+    const features = data.features.map(feature => ({
+      type: 'Feature',
+      properties: feature.attributes,
+      geometry: feature.geometry
+    }));
+    
+    res.json({
+      type: 'FeatureCollection',
+      features: features
+    });
   } catch (error) {
     res.status(500).json({ error: error.message });
   }
