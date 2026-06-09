@@ -4,12 +4,13 @@ Webapp preliminare per supportare Vaprioenergy nell'identificazione di potenzial
 
 L'app consente di:
 
-- selezionare un'area cabina su Vaprio d Adda;
+- selezionare l'area ufficiale GSE di riferimento per Vaprio d Adda;
 - interrogare OpenStreetMap tramite Overpass per trovare potenziali utenze non domestiche;
 - classificare i risultati per macro-categoria utile all'outreach;
+- stimare la superficie dell'edificio quando OSM fornisce una geometria o un edificio associabile;
 - esportare una lista CSV/PDF per le successive verifiche manuali.
 
-> Nota: i poligoni `VAPRIO-NORD`, `VAPRIO-CENTRO` e `VAPRIO-SUD` sono placeholder preliminari. Devono essere sostituiti con le aree convenzionali/cabine primarie ufficiali GSE quando disponibili.
+> Nota: l'area GSE viene caricata tramite il proxy backend `/api/gse-area`, usando il layer ArcGIS reale `AC_Comuni/FeatureServer/21`.
 
 ## Esecuzione locale
 
@@ -44,8 +45,9 @@ Di default l'app prova a usare Overpass reale.
 
 ## Dati principali
 
-- `webapp/data/cabins.json`: punti/aree selezionabili nella UI.
-- `webapp/data/areas.json`: poligoni usati per limitare la ricerca Overpass.
+- `/api/gse-area`: proxy backend per la geometria ufficiale GSE.
+- `/api/osm-search`: ricerca Overpass su target non domestici e geometrie edificio.
+- `webapp/data/cabins.json` e `webapp/data/areas.json`: dati legacy non usati dalla UI principale.
 - `webapp/data/osm-mock.json`: dati demo usati solo con `USE_MOCK_OSM=true`.
 
 ## Export
@@ -57,6 +59,7 @@ Il CSV include colonne pensate per outreach CER:
 - categoria macro e sotto-categoria;
 - indirizzo se disponibile;
 - telefono, sito, email se disponibili in OSM;
+- superficie edificio stimata, fonte del match e ID OSM dell'edificio quando disponibili;
 - coordinate;
 - livello di confidenza;
 - note di verifica.

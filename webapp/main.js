@@ -53,11 +53,6 @@ function loadCabins(){
     li.onclick = () => selectOfficialGseArea(li);
     ul.appendChild(li);
   }
-  document.querySelectorAll('.ac-btn').forEach(button => {
-    button.textContent = officialGseArea.label;
-    button.dataset.code = officialGseArea.code;
-    button.addEventListener('click', () => selectOfficialGseArea(button));
-  });
   setInfo('Seleziona area ufficiale GSE per avviare la ricerca.');
 }
 
@@ -81,7 +76,7 @@ async function fetchOfficialGseArea(){
 async function selectOfficialGseArea(trigger){
   try{
     selectedCabinCode = officialGseArea.code;
-    document.querySelectorAll('#cabinsList li,.ac-btn').forEach(n=>n.classList.remove('active'));
+    document.querySelectorAll('#cabinsList li').forEach(n=>n.classList.remove('active'));
     if(trigger) trigger.classList.add('active');
     setInfo('Caricamento geometria ufficiale GSE (' + officialGseArea.sourceRef + ')...');
 
@@ -114,6 +109,7 @@ function enrichFeatures(features, code){
       const coords = getCoordinates(f);
       const address = formatAddress(p);
       const priority = calculateOutreachPriority(Object.assign({}, p, { address }), cat);
+      const buildingArea = getBuildingArea(p);
       return Object.assign({}, f, {
         properties: Object.assign(p, {
           cabina_cod_ac: code,
@@ -124,6 +120,8 @@ function enrichFeatures(features, code){
           address,
           outreach_name: p.name || p.operator || p.brand || p.shop || p.craft || p.office || p.amenity || p.building || 'Da verificare',
           priorita_outreach: priority,
+          building_area_m2: buildingArea || '',
+          building_area_label: formatBuildingArea(buildingArea),
           note_verifica: buildVerificationNote(p, cat)
         })
       });
@@ -132,13 +130,45 @@ function enrichFeatures(features, code){
       const p = f.properties || {};
       return p.category_macro && (p.outreach_name !== 'Da verificare' || p.confidence !== 'bassa');
     })
-    .sort((a,b) => priorityRank(a.properties.priorita_outreach) - priorityRank(b.properties.priorita_outreach) || String(a.properties.category_macro).localeCompare(String(b.properties.category_macro)) || String(a.properties.outreach_name).localeCompare(String(b.properties.outreach_name)));
+    .sort((a,b) => priorityRank(a.properties.priorita_outreach) - priorityRank(b.properties.priorita_outreach) || getBuildingArea(b.properties) - getBuildingArea(a.properties) || String(a.properties.category_macro).localeCompare(String(b.properties.category_macro)) || String(a.properties.outreach_name).localeCompare(String(b.properties.outreach_name)));
 }
 
 function priorityRank(value){
   if(value === 'alta') return 0;
   if(value === 'media') return 1;
   return 2;
+}
+
+function getBuildingArea(properties){
+  const value = properties && properties.building_area_m2;
+  const area = Number(value);
+  return Number.isFinite(area) && area > 0 ? area : 0;
+}
+
+function formatBuildingArea(area){
+  const value = Number(area);
+  if(!Number.isFinite(value) || value <= 0) return 'n.d.';
+  return Math.round(value).toLocaleString('it-IT') + ' mq';
+}
+
+function markerStyleForFeature(feature){
+  const area = getBuildingArea(feature.properties || {});
+  if(!area){
+    return { radius: 4, color: '#475569', fillColor: '#94a3b8', weight: 1, fillOpacity: 0.78 };
+  }
+  if(area < 250){
+    return { radius: 4, color: '#166534', fillColor: '#22c55e', weight: 1, fillOpacity: 0.88 };
+  }
+  if(area < 750){
+    return { radius: 5, color: '#3f6212', fillColor: '#84cc16', weight: 1, fillOpacity: 0.88 };
+  }
+  if(area < 1500){
+    return { radius: 7, color: '#854d0e', fillColor: '#facc15', weight: 1, fillOpacity: 0.9 };
+  }
+  if(area < 3000){
+    return { radius: 9, color: '#9a3412', fillColor: '#f97316', weight: 1, fillOpacity: 0.9 };
+  }
+  return { radius: 12, color: '#7f1d1d', fillColor: '#dc2626', weight: 1.5, fillOpacity: 0.92 };
 }
 
 function getCoordinates(feature){
@@ -179,10 +209,10 @@ function calculateOutreachPriority(p, cat){
 function renderResults(features, meta){
   if(resultsLayer) resultsLayer.remove();
   resultsLayer = L.geoJSON(features, {
-    pointToLayer: (f, latlng) => L.circleMarker(latlng,{radius:7,fillOpacity:0.9,weight:1}),
+    pointToLayer: (f, latlng) => L.circleMarker(latlng, markerStyleForFeature(f)),
     onEachFeature: (f, layer) => {
       const p = f.properties || {};
-      layer.bindPopup('<strong>' + esc(p.outreach_name) + '</strong><br>' + esc(p.category_macro) + (p.category_sub ? ' / ' + esc(p.category_sub) : '') + '<br>' + esc(p.address || '') + '<br>Priorita: ' + esc(p.priorita_outreach || '') + '<br>Confidenza: ' + esc(p.confidence || ''));
+      layer.bindPopup('<strong>' + esc(p.outreach_name) + '</strong><br>' + esc(p.category_macro) + (p.category_sub ? ' / ' + esc(p.category_sub) : '') + '<br>' + esc(p.address || '') + '<br>Superficie: ' + esc(formatBuildingArea(p.building_area_m2)) + '<br>Priorita: ' + esc(p.priorita_outreach || '') + '<br>Confidenza: ' + esc(p.confidence || ''));
     }
   }).addTo(map);
   try{ if(features.length) map.fitBounds(resultsLayer.getBounds().pad(0.2)); }catch(e){}
@@ -200,20 +230,20 @@ function populateLongList(features){
     const p = f.properties || {};
     const el = document.createElement('div');
     el.className = 'result-item';
-    el.innerHTML = '<strong>' + esc(p.outreach_name) + '</strong><br><small>Priorita: ' + esc(p.priorita_outreach || 'n.d.') + '<br>' + esc(p.category_macro) + (p.category_sub ? ' / ' + esc(p.category_sub) : '') + '<br>' + esc(p.address || 'Indirizzo non disponibile') + '<br>Confidenza: ' + esc(p.confidence || 'n.d.') + '</small>';
+    el.innerHTML = '<strong>' + esc(p.outreach_name) + '</strong><br><small>Priorita: ' + esc(p.priorita_outreach || 'n.d.') + '<br>Superficie: ' + esc(formatBuildingArea(p.building_area_m2)) + '<br>' + esc(p.category_macro) + (p.category_sub ? ' / ' + esc(p.category_sub) : '') + '<br>' + esc(p.address || 'Indirizzo non disponibile') + '<br>Confidenza: ' + esc(p.confidence || 'n.d.') + '</small>';
     div.appendChild(el);
   });
 }
 
 function getSelectedColumns(){
   const preset = document.getElementById('exportPreset')?.value || 'outreach';
-  if(preset === 'minimal') return ['cabina_cod_ac','outreach_name','priorita_outreach','category_macro','category_sub','address','lat','lon','_osm_type','_osm_id'];
+  if(preset === 'minimal') return ['cabina_cod_ac','outreach_name','priorita_outreach','building_area_m2','category_macro','category_sub','address','lat','lon','_osm_type','_osm_id'];
   if(preset === 'all'){
     const inputs = Array.from(document.querySelectorAll('#columnsSelector input[type=checkbox]'));
     const cols = inputs.filter(i=>i.checked).map(i=>i.dataset.col);
     return cols.length ? cols : ['cabina_cod_ac','outreach_name','priorita_outreach','category_macro','category_sub'];
   }
-  return ['cabina_cod_ac','outreach_name','priorita_outreach','category_macro','category_sub','address','phone','contact:phone','email','website','lat','lon','confidence','note_verifica','source','_osm_type','_osm_id'];
+  return ['cabina_cod_ac','outreach_name','priorita_outreach','building_area_m2','building_area_source','building_match_distance_m','category_macro','category_sub','address','phone','contact:phone','email','website','lat','lon','confidence','note_verifica','source','_osm_type','_osm_id','building_osm_type','building_osm_id'];
 }
 
 function exportCSV(){
@@ -243,10 +273,10 @@ async function exportPDF(){
   const doc = new jsPDF({ unit: 'pt', format: 'a4' });
   const body = osmResults.map(f => {
     const p = f.properties || {};
-    return [p.cabina_cod_ac, p.outreach_name, p.priorita_outreach, p.category_macro, p.category_sub, p.address, p.confidence];
+    return [p.cabina_cod_ac, p.outreach_name, p.priorita_outreach, formatBuildingArea(p.building_area_m2), p.category_macro, p.category_sub, p.address, p.confidence];
   });
   doc.text('Potenziali utenze non domestiche - Vaprio d Adda', 40, 40);
-  doc.autoTable({ head: [['Cabina','Nome','Priorita','Macro categoria','Sotto-categoria','Indirizzo','Confidenza']], body, startY: 60, styles: { fontSize: 8 } });
+  doc.autoTable({ head: [['Cabina','Nome','Priorita','Superficie','Macro categoria','Sotto-categoria','Indirizzo','Confidenza']], body, startY: 60, styles: { fontSize: 8 } });
   doc.save('vaprio_potenziali_utenti_' + (selectedCabinCode || 'export') + '.pdf');
 }
 

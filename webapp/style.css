@@ -10,8 +10,7 @@ h2{font-size:15px;margin:0 0 8px;color:var(--text)}
 #cabinsList{list-style:none;padding:0;margin:8px 0}
 #cabinsList li{padding:8px;border-radius:6px;cursor:pointer;border:1px solid transparent;font-size:13px}
 #cabinsList li:hover{background:#eaf2ff;border-color:#c7dcff}
-#cabinsList li.active,.ac-btn.active{background:#cfe4ff;font-weight:600;color:#0b4da2}
-.quick-actions{display:flex;flex-direction:column;gap:6px;margin-top:8px}
+#cabinsList li.active{background:#cfe4ff;font-weight:600;color:#0b4da2}
 .controls-row{display:flex;gap:6px;align-items:center;margin-bottom:8px}
 #columnsSelector{display:flex;flex-wrap:wrap;gap:6px;font-size:12px;color:var(--text)}
 #columnsSelector label{background:#f2f4f7;border:1px solid #e4e7ec;border-radius:4px;padding:4px 6px;color:var(--text)}
@@ -25,7 +24,5 @@ h2{font-size:15px;margin:0 0 8px;color:var(--text)}
 button{background:#fff;border:1px solid var(--ceah-blue);color:var(--ceah-blue);padding:7px 9px;border-radius:5px;cursor:pointer;font-size:13px}
 button:hover{background:var(--ceah-blue);color:#fff}
 select{border:1px solid #d0d5dd;padding:7px;border-radius:5px;max-width:145px}
-.ac-btn{border-color:var(--ceah-green);color:var(--ceah-green)}
-.ac-btn:hover{background:var(--ceah-green);color:#fff}
 .leaflet-popup-content{font-size:13px;line-height:1.35}
 @media (max-width:800px){#sidebar{width:280px}#map{left:304px}}

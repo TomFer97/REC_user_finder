@@ -16,13 +16,8 @@
 
     <section class="panel">
       <h2>Aree cabina</h2>
-      <p class="hint">Seleziona un'area per interrogare OpenStreetMap e generare una lista esportabile di target per outreach.</p>
+      <p class="hint">Seleziona l'area ufficiale GSE per interrogare OpenStreetMap e generare una lista esportabile di target per outreach.</p>
       <ul id="cabinsList"></ul>
-      <div class="quick-actions">
-        <button class="ac-btn" data-code="VAPRIO-NORD">Vaprio Nord</button>
-        <button class="ac-btn" data-code="VAPRIO-CENTRO">Vaprio Centro</button>
-        <button class="ac-btn" data-code="VAPRIO-SUD">Vaprio Sud</button>
-      </div>
     </section>
 
     <section class="panel">
@@ -42,6 +37,7 @@
         <label><input type="checkbox" data-col="category_macro" checked> Categoria</label>
         <label><input type="checkbox" data-col="category_sub" checked> Sotto-categoria</label>
         <label><input type="checkbox" data-col="address" checked> Indirizzo</label>
+        <label><input type="checkbox" data-col="building_area_m2" checked> Superficie</label>
         <label><input type="checkbox" data-col="phone"> Telefono</label>
         <label><input type="checkbox" data-col="website"> Sito</label>
         <label><input type="checkbox" data-col="email"> Email</label>
@@ -49,6 +45,8 @@
         <label><input type="checkbox" data-col="lon" checked> Lon</label>
         <label><input type="checkbox" data-col="confidence" checked> Confidenza</label>
         <label><input type="checkbox" data-col="note_verifica"> Note</label>
+        <label><input type="checkbox" data-col="building_area_source"> Fonte superficie</label>
+        <label><input type="checkbox" data-col="building_osm_id"> OSM edificio</label>
         <label><input type="checkbox" data-col="_osm_type"> OSM type</label>
         <label><input type="checkbox" data-col="_osm_id"> OSM ID</label>
       </div>
