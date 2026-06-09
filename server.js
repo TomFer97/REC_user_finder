@@ -6,7 +6,10 @@ const path = require('path');
 const app = express();
 const port = process.env.PORT || 3000;
 const useMockOsm = String(process.env.USE_MOCK_OSM || '').toLowerCase() === 'true';
-const overpassUrl = process.env.OVERPASS_URL || 'https://overpass-api.de/api/interpreter';
+const overpassUrls = (process.env.OVERPASS_URLS || process.env.OVERPASS_URL || 'https://overpass-api.de/api/interpreter,https://overpass.kumi.systems/api/interpreter')
+  .split(',')
+  .map(url => url.trim())
+  .filter(Boolean);
 
 app.use(cors());
 app.use(express.json({ limit: '4mb' }));
@@ -257,3 +260,23 @@ app.get('*', (req, res) => {
 app.listen(port, () => {
   console.log(`Server listening on http://localhost:${port}`);
 });
+
+async function fetchOverpassWithFallback(query){
+  const errors = [];
+  for(const url of overpassUrls){
+    try{
+      const response = await fetch(url, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/x-www-form-urlencoded', Accept: 'application/json' },
+        body: new URLSearchParams({ data: query })
+      });
+      if(response.ok) return { data: await response.json(), url };
+      const text = await response.text();
+      errors.push(`${url} -> ${response.status}: ${text.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').slice(0, 180)}`);
+      if(response.status !== 429 && response.status < 500) break;
+    }catch(err){
+      errors.push(`${url} -> ${err.message}`);
+    }
+  }
+  throw new Error('Overpass temporaneamente non disponibile o in rate limit. Riprova tra qualche minuto oppure avvia con USE_MOCK_OSM=true. Dettagli: ' + errors.join(' | '));
+}

@@ -5,6 +5,15 @@ let selectedLayer, resultsLayer;
 let osmResults = [];
 let selectedCabinCode = '';
 
+const officialGseArea = {
+  code: 'VAPRIO-GSE-370',
+  label: 'Vaprio d Adda - area GSE ufficiale',
+  layer: 19,
+  objectId: 370,
+  serviceBase: 'https://services.arcgisonline.com/arcgis/rest/services/governance/infrastructure_governance/FeatureServer',
+  sourceRef: 'dataSource_3-190075c1b0d-layer-19:370'
+};
+
 function setInfo(message){
   const el = document.getElementById('info');
   if(el) el.textContent = message;
@@ -17,7 +26,7 @@ function esc(value){
 async function fetchJson(url, options){
   const response = await fetch(url, options);
   if(!response.ok){
-    let message = `${response.status} ${response.statusText}`;
+    let message = response.status + ' ' + response.statusText;
     try{
       const body = await response.json();
       if(body && body.error) message = body.error;
@@ -29,61 +38,75 @@ async function fetchJson(url, options){
   return response.json();
 }
 
-async function loadCabins(){
-  try{
-    const data = await fetchJson('/api/cabins');
-    populateCabinList(data.features || []);
-    const layer = L.geoJSON(data, {
-      pointToLayer: (f, latlng) => L.circleMarker(latlng, { radius: 7, weight: 2, fillOpacity: 0.8 }),
-      onEachFeature: (feature, layer) => {
-        const p = feature.properties || {};
-        const label = p.COD_AC || p.NOME || 'Area cabina';
-        layer.bindPopup(`<strong>${esc(label)}</strong><br>${esc(p.COMUNE || '')}`);
-      }
-    }).addTo(map);
-    try{ map.fitBounds(layer.getBounds().pad(0.2)); }catch(e){}
-  }catch(err){
-    setInfo('Errore caricamento cabine: ' + err.message);
-  }
-}
-
-function populateCabinList(features){
+function loadCabins(){
   const ul = document.getElementById('cabinsList');
-  if(!ul) return;
-  ul.innerHTML = '';
-  features.forEach(feature => {
-    const p = feature.properties || {};
-    const code = p.COD_AC || p.NOME;
+  if(ul){
+    ul.innerHTML = '';
     const li = document.createElement('li');
-    li.textContent = `${p.COD_AC || 'Area'}${p.COMUNE ? ' - ' + p.COMUNE : ''}`;
-    li.dataset.code = code;
-    li.onclick = () => selectAreaByCode(code, li);
+    li.textContent = officialGseArea.label;
+    li.dataset.code = officialGseArea.code;
+    li.onclick = () => selectOfficialGseArea(li);
     ul.appendChild(li);
+  }
+  document.querySelectorAll('.ac-btn').forEach(button => {
+    button.textContent = officialGseArea.label;
+    button.dataset.code = officialGseArea.code;
+    button.addEventListener('click', () => selectOfficialGseArea(button));
   });
+  setInfo('Seleziona area ufficiale GSE per avviare la ricerca.');
 }
 
-async function selectAreaByCode(code, li){
-  try{
-    selectedCabinCode = code;
-    document.querySelectorAll('#cabinsList li,.ac-btn').forEach(n=>n.classList.remove('active'));
-    if(li) li.classList.add('active');
-    setInfo(`Caricamento area ${code}...`);
+async function fetchOfficialGseArea(){
+  const query = new URLSearchParams({
+    objectIds: String(officialGseArea.objectId),
+    outFields: '*',
+    returnGeometry: 'true',
+    outSR: '4326',
+    f: 'geojson'
+  }).toString();
+  const url = officialGseArea.serviceBase + '/' + officialGseArea.layer + '/query?' + query;
+  const data = await fetchJson(url);
+  if(!data.features || !data.features.length){
+    throw new Error('Nessuna geometria GSE trovata per ' + officialGseArea.sourceRef);
+  }
+  data.features = data.features.map((feature, idx) => ({
+    type: 'Feature',
+    id: feature.id || officialGseArea.code + '-' + idx,
+    geometry: feature.geometry,
+    properties: Object.assign({}, feature.properties || {}, {
+      COD_AC: officialGseArea.code,
+      NOME: officialGseArea.label,
+      COMUNE: 'Vaprio d Adda',
+      SOURCE_REF: officialGseArea.sourceRef,
+      GSE_LAYER: officialGseArea.layer,
+      GSE_OBJECTID: officialGseArea.objectId
+    })
+  }));
+  return data;
+}
 
-    const geo = await fetchJson(`/api/area?code=${encodeURIComponent(code)}`);
+async function selectOfficialGseArea(trigger){
+  try{
+    selectedCabinCode = officialGseArea.code;
+    document.querySelectorAll('#cabinsList li,.ac-btn').forEach(n=>n.classList.remove('active'));
+    if(trigger) trigger.classList.add('active');
+    setInfo('Caricamento geometria ufficiale GSE (' + officialGseArea.sourceRef + ')...');
+
+    const geo = await fetchOfficialGseArea();
     const feature = geo.features && geo.features[0];
-    if(!feature) throw new Error('Area non trovata');
+    if(!feature) throw new Error('Area GSE non trovata');
 
     if(selectedLayer) selectedLayer.remove();
     selectedLayer = L.geoJSON(feature, { style: { color: '#00a5ff', weight: 3, fillOpacity: 0.12 } }).addTo(map);
     try{ map.fitBounds(selectedLayer.getBounds().pad(0.2)); }catch(e){}
 
-    setInfo(`Area ${code} caricata. Ricerca utenze non domestiche in corso...`);
+    setInfo('Area GSE caricata. Ricerca utenze non domestiche in corso...');
     const osm = await fetchJson('/api/osm-search', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ geojson: feature.geometry })
     });
-    osmResults = enrichFeatures(osm.features || [], code);
+    osmResults = enrichFeatures(osm.features || [], officialGseArea.code);
     renderResults(osmResults, osm.meta || {});
   }catch(err){
     setInfo('Errore: ' + err.message);
@@ -96,6 +119,8 @@ function enrichFeatures(features, code){
       const p = Object.assign({}, f.properties || {});
       const cat = categorizeFeature(p);
       const coords = getCoordinates(f);
+      const address = formatAddress(p);
+      const priority = calculateOutreachPriority(Object.assign({}, p, { address }), cat);
       return Object.assign({}, f, {
         properties: Object.assign(p, {
           cabina_cod_ac: code,
@@ -103,8 +128,9 @@ function enrichFeatures(features, code){
           category_sub: cat.sub,
           lat: coords.lat,
           lon: coords.lon,
-          address: formatAddress(p),
+          address,
           outreach_name: p.name || p.operator || p.brand || p.shop || p.craft || p.office || p.amenity || p.building || 'Da verificare',
+          priorita_outreach: priority,
           note_verifica: buildVerificationNote(p, cat)
         })
       });
@@ -113,7 +139,13 @@ function enrichFeatures(features, code){
       const p = f.properties || {};
       return p.category_macro && (p.outreach_name !== 'Da verificare' || p.confidence !== 'bassa');
     })
-    .sort((a,b) => String(a.properties.category_macro).localeCompare(String(b.properties.category_macro)) || String(a.properties.outreach_name).localeCompare(String(b.properties.outreach_name)));
+    .sort((a,b) => priorityRank(a.properties.priorita_outreach) - priorityRank(b.properties.priorita_outreach) || String(a.properties.category_macro).localeCompare(String(b.properties.category_macro)) || String(a.properties.outreach_name).localeCompare(String(b.properties.outreach_name)));
+}
+
+function priorityRank(value){
+  if(value === 'alta') return 0;
+  if(value === 'media') return 1;
+  return 2;
 }
 
 function getCoordinates(feature){
@@ -134,19 +166,36 @@ function buildVerificationNote(p, cat){
   return 'Potenziale utenza non domestica identificata da tag OSM.';
 }
 
+function calculateOutreachPriority(p, cat){
+  let score = 0;
+  const macro = (cat.macro || '').toLowerCase();
+  const sub = (cat.sub || '').toLowerCase();
+  const confidence = (p.confidence || '').toLowerCase();
+  if(['negozi e servizi locali','artigiani e laboratori','uffici e pmi','servizi pubblici o collettivi'].includes(macro)) score += 2;
+  if(sub.includes('supermercato') || sub.includes('alimentari') || sub.includes('macelleria') || sub.includes('panetteria') || sub.includes('farmacia') || sub.includes('scuola')) score += 2;
+  if(p.name || p.operator || p.brand) score += 1;
+  if(p['addr:street'] || p.address) score += 1;
+  if(p.phone || p['contact:phone'] || p.email || p.website || p.url) score += 1;
+  if(confidence === 'alta') score += 2;
+  else if(confidence === 'media') score += 1;
+  if(score >= 6) return 'alta';
+  if(score >= 3) return 'media';
+  return 'bassa';
+}
+
 function renderResults(features, meta){
   if(resultsLayer) resultsLayer.remove();
   resultsLayer = L.geoJSON(features, {
     pointToLayer: (f, latlng) => L.circleMarker(latlng,{radius:7,fillOpacity:0.9,weight:1}),
     onEachFeature: (f, layer) => {
       const p = f.properties || {};
-      layer.bindPopup(`<strong>${esc(p.outreach_name)}</strong><br>${esc(p.category_macro)}${p.category_sub ? ' / ' + esc(p.category_sub) : ''}<br>${esc(p.address || '')}<br>Confidenza: ${esc(p.confidence || '')}`);
+      layer.bindPopup('<strong>' + esc(p.outreach_name) + '</strong><br>' + esc(p.category_macro) + (p.category_sub ? ' / ' + esc(p.category_sub) : '') + '<br>' + esc(p.address || '') + '<br>Priorita: ' + esc(p.priorita_outreach || '') + '<br>Confidenza: ' + esc(p.confidence || ''));
     }
   }).addTo(map);
   try{ if(features.length) map.fitBounds(resultsLayer.getBounds().pad(0.2)); }catch(e){}
   populateLongList(features);
   const source = meta.source === 'mock' ? 'mock' : 'OpenStreetMap/Overpass';
-  setInfo(`Trovati ${features.length} potenziali utenti non domestici. Fonte: ${source}.`);
+  setInfo('Trovati ' + features.length + ' potenziali utenti non domestici. Fonte area: GSE. Fonte target: ' + source + '.');
 }
 
 function populateLongList(features){
@@ -158,20 +207,20 @@ function populateLongList(features){
     const p = f.properties || {};
     const el = document.createElement('div');
     el.className = 'result-item';
-    el.innerHTML = `<strong>${esc(p.outreach_name)}</strong><br><small>${esc(p.category_macro)}${p.category_sub ? ' / ' + esc(p.category_sub) : ''}<br>${esc(p.address || 'Indirizzo non disponibile')}<br>Confidenza: ${esc(p.confidence || 'n.d.')}</small>`;
+    el.innerHTML = '<strong>' + esc(p.outreach_name) + '</strong><br><small>Priorita: ' + esc(p.priorita_outreach || 'n.d.') + '<br>' + esc(p.category_macro) + (p.category_sub ? ' / ' + esc(p.category_sub) : '') + '<br>' + esc(p.address || 'Indirizzo non disponibile') + '<br>Confidenza: ' + esc(p.confidence || 'n.d.') + '</small>';
     div.appendChild(el);
   });
 }
 
 function getSelectedColumns(){
   const preset = document.getElementById('exportPreset')?.value || 'outreach';
-  if(preset === 'minimal') return ['cabina_cod_ac','outreach_name','category_macro','category_sub','address','lat','lon','_osm_type','_osm_id'];
+  if(preset === 'minimal') return ['cabina_cod_ac','outreach_name','priorita_outreach','category_macro','category_sub','address','lat','lon','_osm_type','_osm_id'];
   if(preset === 'all'){
     const inputs = Array.from(document.querySelectorAll('#columnsSelector input[type=checkbox]'));
     const cols = inputs.filter(i=>i.checked).map(i=>i.dataset.col);
-    return cols.length ? cols : ['cabina_cod_ac','outreach_name','category_macro','category_sub'];
+    return cols.length ? cols : ['cabina_cod_ac','outreach_name','priorita_outreach','category_macro','category_sub'];
   }
-  return ['cabina_cod_ac','outreach_name','category_macro','category_sub','address','phone','contact:phone','email','website','lat','lon','confidence','note_verifica','source','_osm_type','_osm_id'];
+  return ['cabina_cod_ac','outreach_name','priorita_outreach','category_macro','category_sub','address','phone','contact:phone','email','website','lat','lon','confidence','note_verifica','source','_osm_type','_osm_id'];
 }
 
 function exportCSV(){
@@ -183,7 +232,7 @@ function exportCSV(){
   const url = URL.createObjectURL(blob);
   const a = document.createElement('a');
   a.href = url;
-  a.download = `vaprio_potenziali_utenti_non_domestici_${selectedCabinCode || 'export'}.csv`;
+  a.download = 'vaprio_potenziali_utenti_non_domestici_' + (selectedCabinCode || 'export') + '.csv';
   document.body.appendChild(a);
   a.click();
   a.remove();
@@ -192,7 +241,7 @@ function exportCSV(){
 
 function csvCell(value){
   const v = String(value ?? '');
-  return `"${v.replace(/"/g,'""')}"`;
+  return '"' + v.replace(/"/g,'""') + '"';
 }
 
 async function exportPDF(){
@@ -201,11 +250,11 @@ async function exportPDF(){
   const doc = new jsPDF({ unit: 'pt', format: 'a4' });
   const body = osmResults.map(f => {
     const p = f.properties || {};
-    return [p.cabina_cod_ac, p.outreach_name, p.category_macro, p.category_sub, p.address, p.confidence];
+    return [p.cabina_cod_ac, p.outreach_name, p.priorita_outreach, p.category_macro, p.category_sub, p.address, p.confidence];
   });
   doc.text('Potenziali utenze non domestiche - Vaprio d Adda', 40, 40);
-  doc.autoTable({ head: [['Cabina','Nome','Macro categoria','Sotto-categoria','Indirizzo','Confidenza']], body, startY: 60, styles: { fontSize: 8 } });
-  doc.save(`vaprio_potenziali_utenti_${selectedCabinCode || 'export'}.pdf`);
+  doc.autoTable({ head: [['Cabina','Nome','Priorita','Macro categoria','Sotto-categoria','Indirizzo','Confidenza']], body, startY: 60, styles: { fontSize: 8 } });
+  doc.save('vaprio_potenziali_utenti_' + (selectedCabinCode || 'export') + '.pdf');
 }
 
 function categorizeFeature(p){
@@ -244,9 +293,6 @@ function categorizeFeature(p){
 
 document.addEventListener('DOMContentLoaded', () => {
   loadCabins();
-  document.querySelectorAll('.ac-btn').forEach(button => {
-    button.addEventListener('click', () => selectAreaByCode(button.dataset.code, button));
-  });
   document.getElementById('exportCsvBtn')?.addEventListener('click', exportCSV);
   document.getElementById('exportPdfBtn')?.addEventListener('click', exportPDF);
 });
