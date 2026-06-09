@@ -1,402 +1,298 @@
-const map = L.map('map').setView([45.54, 9.44], 14);
+const map = L.map('map').setView([45.576, 9.525], 13);
 L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',{maxZoom:19,attribution:'© OpenStreetMap contributors'}).addTo(map);
 
-let cabinLayer, membersLayer, selectedLayer, podLayer;
+let selectedLayer, resultsLayer;
 let osmResults = [];
-let buildingsLayer, poiLayer;
-const cabinsUrl = '/api/cabins';
-const membersUrl = 'data/members.geojson';
+let selectedCabinCode = '';
 
-function loadData(){
-  Promise.all([fetch(cabinsUrl).then(r=>r.json()), fetch(membersUrl).then(r=>r.json())])
-    .then(([cabins,members])=>{
-      cabinLayer = L.geoJSON(cabins, {
-        style: {color: '#ff7800', weight: 2, fillOpacity: 0.1},
-        onEachFeature: (feature, layer) => {
-          const label = feature.properties.COD_AC || feature.properties.RAG_SOC || 'Cabina';
-          layer.bindPopup(`<strong>${label}</strong><br>${feature.properties.RAG_SOC || ''}`);
-          layer.on('click', () => {
-            const item = document.querySelector(`#cabinsList li[data-id='${feature.properties.COD_AC}']`);
-            if (item) selectCabin(feature, item);
-          });
-        }
-      }).addTo(map);
+const officialGseArea = {
+  code: 'VAPRIO-GSE-370',
+  label: 'Vaprio d Adda - area GSE ufficiale',
+  layer: 19,
+  objectId: 370,
+  serviceBase: 'https://services.arcgisonline.com/arcgis/rest/services/governance/infrastructure_governance/FeatureServer',
+  sourceRef: 'dataSource_3-190075c1b0d-layer-19:370'
+};
 
-      membersLayer = L.geoJSON(members, {
-        pointToLayer: (f, latlng) => L.circleMarker(latlng, {radius:6, fillColor:'#3388ff', color:'#fff', weight:1, fillOpacity:1}),
-      }).addTo(map);
-
-      populateList(cabins.features);
-      // map.fitBounds(cabinLayer.getBounds());  // Commentato per mantenere vista su Vaprio d'Adda
-    })
+function setInfo(message){
+  const el = document.getElementById('info');
+  if(el) el.textContent = message;
 }
 
-function populateList(features){
+function esc(value){
+  return String(value ?? '').replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+}
+
+async function fetchJson(url, options){
+  const response = await fetch(url, options);
+  if(!response.ok){
+    let message = response.status + ' ' + response.statusText;
+    try{
+      const body = await response.json();
+      if(body && body.error) message = body.error;
+    }catch(e){
+      try{ message = await response.text(); }catch(e2){}
+    }
+    throw new Error(message);
+  }
+  return response.json();
+}
+
+function loadCabins(){
   const ul = document.getElementById('cabinsList');
-  ul.innerHTML = '';
-  features.forEach((f) => {
-    const label = f.properties.COD_AC || f.properties.RAG_SOC || 'Cabina';
-     // Skip the hardcoded AC buttons
-     const acCode = f.properties.COD_AC;
-     if (acCode && ['AC001E01397', 'AC001E01398', 'AC001E01364'].includes(acCode)) return;
-     const li = document.createElement('li');
-     li.textContent = label;
-     li.dataset.id = acCode || label;
-     li.onclick = () => { selectCabin(f, li); };
-     ul.appendChild(li);
+  if(ul){
+    ul.innerHTML = '';
+    const li = document.createElement('li');
+    li.textContent = officialGseArea.label;
+    li.dataset.code = officialGseArea.code;
+    li.onclick = () => selectOfficialGseArea(li);
+    ul.appendChild(li);
+  }
+  document.querySelectorAll('.ac-btn').forEach(button => {
+    button.textContent = officialGseArea.label;
+    button.dataset.code = officialGseArea.code;
+    button.addEventListener('click', () => selectOfficialGseArea(button));
   });
+  setInfo('Seleziona area ufficiale GSE per avviare la ricerca.');
 }
 
-function selectCabin(feature, li){
-  document.querySelectorAll('#cabinsList li').forEach(n=>n.classList.remove('active'));
-  li.classList.add('active');
-
-  if (selectedLayer) {
-    selectedLayer.remove();
+async function fetchOfficialGseArea(){
+  const query = new URLSearchParams({
+    objectIds: String(officialGseArea.objectId),
+    outFields: '*',
+    returnGeometry: 'true',
+    outSR: '4326',
+    f: 'geojson'
+  }).toString();
+  const url = officialGseArea.serviceBase + '/' + officialGseArea.layer + '/query?' + query;
+  const data = await fetchJson(url);
+  if(!data.features || !data.features.length){
+    throw new Error('Nessuna geometria GSE trovata per ' + officialGseArea.sourceRef);
   }
-
-  selectedLayer = L.geoJSON(feature, {
-    style: {color: '#00a5ff', weight: 3, fillOpacity: 0.15}
-  }).addTo(map);
-
-  const bounds = selectedLayer.getBounds();
-  if (bounds.isValid()) {
-    map.fitBounds(bounds.pad(0.2));
-  }
-
-  const membersGeo = membersLayer.toGeoJSON();
-  const inside = membersGeo.features.filter(m => turf.booleanPointInPolygon(m, feature));
-
-  highlightMembers(inside);
-  document.getElementById('info').textContent = `Membri trovati: ${inside.length}`;
+  data.features = data.features.map((feature, idx) => ({
+    type: 'Feature',
+    id: feature.id || officialGseArea.code + '-' + idx,
+    geometry: feature.geometry,
+    properties: Object.assign({}, feature.properties || {}, {
+      COD_AC: officialGseArea.code,
+      NOME: officialGseArea.label,
+      COMUNE: 'Vaprio d Adda',
+      SOURCE_REF: officialGseArea.sourceRef,
+      GSE_LAYER: officialGseArea.layer,
+      GSE_OBJECTID: officialGseArea.objectId
+    })
+  }));
+  return data;
 }
 
-function highlightMembers(features){
-  membersLayer.clearLayers();
-  membersLayer.addData(features.map(f=>({type:'Feature',geometry:f.geometry,properties:f.properties}))).addTo(map);
-}
-
-// loadData();  // Commentato per nascondere dati di Roma - la mappa rimane su Vaprio d'Adda
-
-// POD search: call backend /api/pod-search using map center and given radius
-async function podSearch(){
-  const center = map.getCenter();
-  const lat = center.lat;
-  const lng = center.lng;
-  const distance = document.getElementById('radiusInput').value || 500;
-  const url = `/api/pod-search?lat=${encodeURIComponent(lat)}&lng=${encodeURIComponent(lng)}&distance=${encodeURIComponent(distance)}`;
-  document.getElementById('info').textContent = 'Ricerca POD in corso...';
+async function selectOfficialGseArea(trigger){
   try{
-    const resp = await fetch(url);
-    if(!resp.ok) throw new Error(`Errore server: ${resp.status}`);
-    const geo = await resp.json();
-    renderPodResults(geo);
+    selectedCabinCode = officialGseArea.code;
+    document.querySelectorAll('#cabinsList li,.ac-btn').forEach(n=>n.classList.remove('active'));
+    if(trigger) trigger.classList.add('active');
+    setInfo('Caricamento geometria ufficiale GSE (' + officialGseArea.sourceRef + ')...');
+
+    const geo = await fetchOfficialGseArea();
+    const feature = geo.features && geo.features[0];
+    if(!feature) throw new Error('Area GSE non trovata');
+
+    if(selectedLayer) selectedLayer.remove();
+    selectedLayer = L.geoJSON(feature, { style: { color: '#00a5ff', weight: 3, fillOpacity: 0.12 } }).addTo(map);
+    try{ map.fitBounds(selectedLayer.getBounds().pad(0.2)); }catch(e){}
+
+    setInfo('Area GSE caricata. Ricerca utenze non domestiche in corso...');
+    const osm = await fetchJson('/api/osm-search', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ geojson: feature.geometry })
+    });
+    osmResults = enrichFeatures(osm.features || [], officialGseArea.code);
+    renderResults(osmResults, osm.meta || {});
   }catch(err){
-    document.getElementById('info').textContent = 'Errore ricerca POD: '+err.message;
+    setInfo('Errore: ' + err.message);
   }
 }
 
-function renderPodResults(geojson){
-  // clear existing layers
-  if(podLayer) podLayer.remove();
-  if(buildingsLayer) buildingsLayer.remove();
-  if(poiLayer) poiLayer.remove();
-
-  const features = (geojson && geojson.features) ? geojson.features : [];
-  const polys = features.filter(f=> f.geometry && (f.geometry.type === 'Polygon' || f.geometry.type === 'MultiPolygon'));
-  const points = features.filter(f=> f.geometry && f.geometry.type === 'Point');
-
-  buildingsLayer = L.geoJSON(polys, {
-    style: { color: '#d4a600', weight:1, fillColor: '#ddd', fillOpacity: 0.4 }
-  }).addTo(map);
-
-  poiLayer = L.geoJSON(points, {
-    pointToLayer: (f,latlng) => L.circleMarker(latlng,{radius:6,fillColor:'#ff3333',color:'#fff',weight:1,fillOpacity:1}),
-    onEachFeature: (f,layer)=>{
+function enrichFeatures(features, code){
+  return features
+    .map(f => {
+      const p = Object.assign({}, f.properties || {});
+      const cat = categorizeFeature(p);
+      const coords = getCoordinates(f);
+      const address = formatAddress(p);
+      const priority = calculateOutreachPriority(Object.assign({}, p, { address }), cat);
+      return Object.assign({}, f, {
+        properties: Object.assign(p, {
+          cabina_cod_ac: code,
+          category_macro: cat.macro,
+          category_sub: cat.sub,
+          lat: coords.lat,
+          lon: coords.lon,
+          address,
+          outreach_name: p.name || p.operator || p.brand || p.shop || p.craft || p.office || p.amenity || p.building || 'Da verificare',
+          priorita_outreach: priority,
+          note_verifica: buildVerificationNote(p, cat)
+        })
+      });
+    })
+    .filter(f => {
       const p = f.properties || {};
-      layer.bindPopup(Object.keys(p).map(k=>`<strong>${k}</strong>: ${p[k]}`).join('<br>'));
+      return p.category_macro && (p.outreach_name !== 'Da verificare' || p.confidence !== 'bassa');
+    })
+    .sort((a,b) => priorityRank(a.properties.priorita_outreach) - priorityRank(b.properties.priorita_outreach) || String(a.properties.category_macro).localeCompare(String(b.properties.category_macro)) || String(a.properties.outreach_name).localeCompare(String(b.properties.outreach_name)));
+}
+
+function priorityRank(value){
+  if(value === 'alta') return 0;
+  if(value === 'media') return 1;
+  return 2;
+}
+
+function getCoordinates(feature){
+  if(feature.geometry && feature.geometry.type === 'Point'){
+    const [lon, lat] = feature.geometry.coordinates;
+    return { lat, lon };
+  }
+  return { lat: '', lon: '' };
+}
+
+function formatAddress(p){
+  return [p['addr:street'], p['addr:housenumber'], p['addr:postcode'], p['addr:city']].filter(Boolean).join(' ');
+}
+
+function buildVerificationNote(p, cat){
+  if(!p.name && !p.operator && !p.brand) return 'Nome non disponibile in OSM: verificare manualmente prima del contatto.';
+  if(cat.macro === 'Edificio potenzialmente non domestico') return 'Classificazione basata su tag edificio: verificare occupante/attivita.';
+  return 'Potenziale utenza non domestica identificata da tag OSM.';
+}
+
+function calculateOutreachPriority(p, cat){
+  let score = 0;
+  const macro = (cat.macro || '').toLowerCase();
+  const sub = (cat.sub || '').toLowerCase();
+  const confidence = (p.confidence || '').toLowerCase();
+  if(['negozi e servizi locali','artigiani e laboratori','uffici e pmi','servizi pubblici o collettivi'].includes(macro)) score += 2;
+  if(sub.includes('supermercato') || sub.includes('alimentari') || sub.includes('macelleria') || sub.includes('panetteria') || sub.includes('farmacia') || sub.includes('scuola')) score += 2;
+  if(p.name || p.operator || p.brand) score += 1;
+  if(p['addr:street'] || p.address) score += 1;
+  if(p.phone || p['contact:phone'] || p.email || p.website || p.url) score += 1;
+  if(confidence === 'alta') score += 2;
+  else if(confidence === 'media') score += 1;
+  if(score >= 6) return 'alta';
+  if(score >= 3) return 'media';
+  return 'bassa';
+}
+
+function renderResults(features, meta){
+  if(resultsLayer) resultsLayer.remove();
+  resultsLayer = L.geoJSON(features, {
+    pointToLayer: (f, latlng) => L.circleMarker(latlng,{radius:7,fillOpacity:0.9,weight:1}),
+    onEachFeature: (f, layer) => {
+      const p = f.properties || {};
+      layer.bindPopup('<strong>' + esc(p.outreach_name) + '</strong><br>' + esc(p.category_macro) + (p.category_sub ? ' / ' + esc(p.category_sub) : '') + '<br>' + esc(p.address || '') + '<br>Priorita: ' + esc(p.priorita_outreach || '') + '<br>Confidenza: ' + esc(p.confidence || ''));
     }
   }).addTo(map);
-
-  // Highlight building polygons that contain POI features
-  try{
-    polys.forEach(polyF => {
-      polyF._highlighted = false;
-    });
-    points.forEach(pt => {
-      const point = pt.geometry;
-      polys.forEach(polyF => {
-        if(!polyF.geometry) return;
-        const inside = turf.booleanPointInPolygon(point, polyF);
-        if(inside) polyF._highlighted = true;
-      });
-    });
-
-    // apply highlights
-    buildingsLayer.eachLayer(layer => {
-      const f = layer.feature;
-      if(f && f._highlighted){
-        layer.setStyle({ fillColor: '#ffeb3b', fillOpacity: 0.8, color: '#d4a600' });
-      }
-    });
-  }catch(e){ console.warn('Highlight buildings error', e); }
-
-  podLayer = L.featureGroup([buildingsLayer, poiLayer]).addTo(map);
-  const count = points.length;
-  document.getElementById('info').textContent = `Oggetti OSM trovati: ${features.length} (POI: ${count}, Edifici: ${polys.length})`;
-  if(features.length>0){
-    try{ map.fitBounds(podLayer.getBounds().pad(0.2)); }catch(e){}
-  }
+  try{ if(features.length) map.fitBounds(resultsLayer.getBounds().pad(0.2)); }catch(e){}
+  populateLongList(features);
+  const source = meta.source === 'mock' ? 'mock' : 'OpenStreetMap/Overpass';
+  setInfo('Trovati ' + features.length + ' potenziali utenti non domestici. Fonte area: GSE. Fonte target: ' + source + '.');
 }
-
-document.addEventListener('DOMContentLoaded', ()=>{
-  const btn = document.getElementById('searchPodBtn');
-  if(btn) btn.addEventListener('click', podSearch);
-  // AC quick buttons
-  document.querySelectorAll('.ac-btn').forEach(b=>{
-    b.addEventListener('click', async (ev)=>{
-      const code = b.dataset.code;
-      document.getElementById('info').textContent = `Caricamento area ${code}...`;
-      try{
-        const resp = await fetch(`/api/area?code=${encodeURIComponent(code)}`);
-        if(!resp.ok) throw new Error(`Server ${resp.status}`);
-        const geo = await resp.json();
-        if(!geo.features || !geo.features.length){ document.getElementById('info').textContent = 'Area non trovata'; return; }
-        const feature = geo.features[0];
-        // display selected area
-        document.querySelectorAll('#cabinsList li').forEach(n=>n.classList.remove('active'));
-        if (selectedLayer) selectedLayer.remove();
-        selectedLayer = L.geoJSON(feature, { style: { color: '#00a5ff', weight:3, fillOpacity:0.15 } }).addTo(map);
-        try{ map.fitBounds(selectedLayer.getBounds().pad(0.2)); }catch(e){}
-        document.getElementById('info').textContent = `Area ${code} caricata. Ricerca OSM in corso...`;
-
-        // call OSM search with polygon
-        const searchResp = await fetch('/api/osm-search', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ geojson: feature.geometry.type === 'Polygon' ? { type: 'Polygon', coordinates: feature.geometry.coordinates } : feature })
-        });
-        if(!searchResp.ok){
-          // try parse JSON error from server — use clone() to avoid consuming body twice
-          let errText = '';
-          try{
-            const j = await searchResp.clone().json();
-            if(j && j.error) errText = typeof j.error === 'string' ? j.error : JSON.stringify(j.error);
-            else errText = JSON.stringify(j).slice(0,800);
-          }catch(e){
-            try{
-              const t = await searchResp.clone().text();
-              errText = (t || `OSM ${searchResp.status}`).toString().slice(0,800);
-            }catch(e2){
-              errText = `OSM ${searchResp.status}`;
-            }
-          }
-          // simplify common Overpass HTML responses
-          errText = errText.replace(/\s+/g,' ').replace(/<[^>]+>/g,'').trim();
-          // suggest next actions to the user
-          const suggestion = 'Se il problema persiste, riprova con OVERPASS_CONCURRENCY=1 o aumenta semplificazione poligono.';
-          throw new Error(errText + ' — ' + suggestion);
-        }
-        const osm = await searchResp.json();
-        // display meta info if present
-        let metaMsg = '';
-        if(osm && osm.meta){
-          if(osm.meta.paging) metaMsg = ` (paging applicato, parti: ${osm.meta.parts})`;
-          else if(osm.meta.simplified) metaMsg = ` (poligono semplificato: ${osm.meta.usedPointCount}/${osm.meta.originalPointCount})`;
-        }
-        document.getElementById('info').textContent = `Area ${code} caricata. Ricerca OSM completata${metaMsg}`;
-        renderPodResults(osm);
-        // also populate long list
-        populateLongList(osm.features || []);
-      }catch(err){
-        document.getElementById('info').textContent = 'Errore: '+err.message;
-      }
-    });
-  });
-  const csvBtn = document.getElementById('exportCsvBtn');
-  if(csvBtn) csvBtn.addEventListener('click', exportCSV);
-  const pdfBtn = document.getElementById('exportPdfBtn');
-  if(pdfBtn) pdfBtn.addEventListener('click', exportPDF);
-});
 
 function populateLongList(features){
   const div = document.getElementById('resultsList');
+  if(!div) return;
   div.innerHTML = '';
-  osmResults = features || [];
-  if(!osmResults.length){ div.textContent = 'Nessun risultato'; return; }
-  osmResults.forEach(f=>{
+  if(!features.length){ div.textContent = 'Nessun risultato'; return; }
+  features.forEach(f=>{
     const p = f.properties || {};
-    const name = p.name || p.shop || p.craft || p.amenity || '—';
-    const cat = categorizeFeature(p);
-    p.category_macro = cat.macro;
-    p.category_sub = cat.sub;
     const el = document.createElement('div');
-    el.style.padding='6px'; el.style.borderBottom='1px solid #eee';
-    el.innerHTML = `<strong>${name}</strong><br><small>${(p.category_macro||'')} ${p.category_sub?('/ '+p.category_sub):''}<br>${Object.entries(p).slice(0,8).map(([k,v])=>`${k}: ${v}`).join(' | ')}</small>`;
+    el.className = 'result-item';
+    el.innerHTML = '<strong>' + esc(p.outreach_name) + '</strong><br><small>Priorita: ' + esc(p.priorita_outreach || 'n.d.') + '<br>' + esc(p.category_macro) + (p.category_sub ? ' / ' + esc(p.category_sub) : '') + '<br>' + esc(p.address || 'Indirizzo non disponibile') + '<br>Confidenza: ' + esc(p.confidence || 'n.d.') + '</small>';
     div.appendChild(el);
   });
 }
 
 function getSelectedColumns(){
-  const preset = (document.getElementById('exportPreset') && document.getElementById('exportPreset').value) || 'withCategory';
-  if(preset !== 'all') return null;
-  const inputs = Array.from(document.querySelectorAll('#columnsSelector input[type=checkbox]'));
-  const cols = inputs.filter(i=>i.checked).map(i=>i.dataset.col);
-  return cols.length ? cols : null;
+  const preset = document.getElementById('exportPreset')?.value || 'outreach';
+  if(preset === 'minimal') return ['cabina_cod_ac','outreach_name','priorita_outreach','category_macro','category_sub','address','lat','lon','_osm_type','_osm_id'];
+  if(preset === 'all'){
+    const inputs = Array.from(document.querySelectorAll('#columnsSelector input[type=checkbox]'));
+    const cols = inputs.filter(i=>i.checked).map(i=>i.dataset.col);
+    return cols.length ? cols : ['cabina_cod_ac','outreach_name','priorita_outreach','category_macro','category_sub'];
+  }
+  return ['cabina_cod_ac','outreach_name','priorita_outreach','category_macro','category_sub','address','phone','contact:phone','email','website','lat','lon','confidence','note_verifica','source','_osm_type','_osm_id'];
 }
 
 function exportCSV(){
-  if(!osmResults || !osmResults.length){ alert('Nessun risultato da esportare'); return; }
-  // determine preset
-  const preset = (document.getElementById('exportPreset') && document.getElementById('exportPreset').value) || 'withCategory';
-  let cols = [];
-  if(preset === 'minimal') cols = ['name','category_macro','category_sub','_osm_type','_osm_id'];
-  else if(preset === 'withCategory') cols = ['name','category_macro','category_sub','shop','craft','office','amenity','phone','website','addr:street','addr:city','_osm_type','_osm_id'];
-  else cols = ['name','category_macro','category_sub','shop','craft','office','amenity','phone','website','addr:street','addr:city','_osm_type','_osm_id'];
-  // allow custom selection when preset is 'all'
-  const custom = getSelectedColumns();
-  if(custom) cols = custom;
-  const rows = osmResults.map(f=>{
-    const p = f.properties || {};
-    // ensure categories
-    const cat = categorizeFeature(p);
-    p.category_macro = cat.macro;
-    p.category_sub = cat.sub;
-    p.category = `${cat.macro}${cat.sub? ' / '+cat.sub : ''}`;
-    return cols.map(c=>{
-      const key = c;
-      let v = p[key] || p[key.replace(':','_')] || '';
-      if(typeof v === 'string') return `"${v.replace(/"/g,'""')}"`;
-      return `"${v}"`;
-    }).join(',');
-  });
-  const csv = [cols.join(','), ...rows].join('\n');
+  if(!osmResults.length){ alert('Nessun risultato da esportare'); return; }
+  const cols = getSelectedColumns();
+  const rows = osmResults.map(f => cols.map(c => csvCell((f.properties || {})[c])).join(';'));
+  const csv = [cols.join(';'), ...rows].join('\n');
   const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
   const url = URL.createObjectURL(blob);
   const a = document.createElement('a');
   a.href = url;
-  a.download = 'osm_results.csv';
+  a.download = 'vaprio_potenziali_utenti_non_domestici_' + (selectedCabinCode || 'export') + '.csv';
   document.body.appendChild(a);
   a.click();
   a.remove();
   URL.revokeObjectURL(url);
 }
 
+function csvCell(value){
+  const v = String(value ?? '');
+  return '"' + v.replace(/"/g,'""') + '"';
+}
+
 async function exportPDF(){
-  if(!osmResults || !osmResults.length){ alert('Nessun risultato da esportare'); return; }
-  const preset = (document.getElementById('exportPreset') && document.getElementById('exportPreset').value) || 'withCategory';
+  if(!osmResults.length){ alert('Nessun risultato da esportare'); return; }
   const { jsPDF } = window.jspdf;
   const doc = new jsPDF({ unit: 'pt', format: 'a4' });
-
-  // columns according to preset
-  let head = [];
-  if(preset === 'minimal') head = ['Name','Macro','Sotto-categoria','OSM Type','OSM ID'];
-  else head = ['Name','Macro','Sotto-categoria','Type','Phone','Website','Address','OSM ID'];
-
-  // if preset 'all' and custom selected, build head accordingly
-  const custom = getSelectedColumns();
-  if(custom){
-    head = custom.map(c => {
-      if(c === 'name') return 'Name';
-      if(c === 'category_macro') return 'Macro';
-      if(c === 'category_sub') return 'Sotto-categoria';
-      return c;
-    });
-  }
-
   const body = osmResults.map(f => {
     const p = f.properties || {};
-    const name = p.name || p.shop || p.craft || p.amenity || '';
-    const type = p._osm_type || '';
-    const catObj = categorizeFeature(p);
-    const cat = `${catObj.macro}${catObj.sub? ' / '+catObj.sub:''}`;
-    const phone = p.phone || p['contact:phone'] || '';
-    const website = p.website || p.url || '';
-    const addr = [p['addr:street']||'', p['addr:city']||''].filter(Boolean).join(', ');
-    const id = p._osm_id || '';
-    if(custom){
-      return custom.map(c=>{
-        if(c === 'name') return name;
-        if(c === 'category_macro') return catObj.macro;
-        if(c === 'category_sub') return catObj.sub;
-        if(c === '_osm_type') return type;
-        if(c === '_osm_id') return id;
-        if(c === 'phone') return phone;
-        if(c === 'website') return website;
-        if(c === 'addr:street') return p['addr:street']||'';
-        if(c === 'addr:city') return p['addr:city']||'';
-        return p[c] || '';
-      });
-    }
-    if(preset === 'minimal') return [name, catObj.macro, catObj.sub, type, id];
-    return [name, catObj.macro, catObj.sub, type, phone, website, addr, id];
+    return [p.cabina_cod_ac, p.outreach_name, p.priorita_outreach, p.category_macro, p.category_sub, p.address, p.confidence];
   });
-  doc.text('OSM Results', 40, 40);
-  doc.autoTable({ head: [head], body, startY: 60, styles: { fontSize: 9 }, headStyles: { fillColor: [41,128,185] } });
-  doc.save('osm_results.pdf');
+  doc.text('Potenziali utenze non domestiche - Vaprio d Adda', 40, 40);
+  doc.autoTable({ head: [['Cabina','Nome','Priorita','Macro categoria','Sotto-categoria','Indirizzo','Confidenza']], body, startY: 60, styles: { fontSize: 8 } });
+  doc.save('vaprio_potenziali_utenti_' + (selectedCabinCode || 'export') + '.pdf');
 }
 
 function categorizeFeature(p){
-  if(!p) return { macro: '', sub: '' };
-  const lower = (s) => (s||'').toString().toLowerCase();
-
-  // Artigiani e laboratori
+  const lower = (s) => (s || '').toString().toLowerCase();
   if(p.craft){
     const v = lower(p.craft);
-    let sub = p.craft;
-    if(v.includes('carpenter') || v.includes('carpentry') || v.includes('falegname')) sub = 'Falegname';
-    else if(v.includes('plumber') || v.includes('idraul')) sub = 'Idraulico';
-    else if(v.includes('electrician') || v.includes('elettric')) sub = 'Elettricista';
-    else if(v.includes('mechanic') || v.includes('meccan')) sub = 'Officina meccanica';
-    else if(v.includes('tailor') || v.includes('sarto')) sub = 'Sarto';
-    return { macro: 'Artigiani e laboratori', sub };
+    if(v.includes('car_repair') || v.includes('mechanic')) return { macro: 'Artigiani e laboratori', sub: 'Officina / autoriparazione' };
+    if(v.includes('electrician')) return { macro: 'Artigiani e laboratori', sub: 'Elettricista' };
+    if(v.includes('plumber')) return { macro: 'Artigiani e laboratori', sub: 'Idraulico' };
+    if(v.includes('carpenter')) return { macro: 'Artigiani e laboratori', sub: 'Falegname' };
+    return { macro: 'Artigiani e laboratori', sub: p.craft };
   }
-
-  // Negozi e servizi locali
   if(p.shop){
     const v = lower(p.shop);
-    if(v.includes('bakery') || v.includes('panett') || v.includes('panificio')) return { macro: 'Negozi e servizi locali', sub: 'Panetteria / Pasticceria' };
-    if(v.includes('butcher') || v.includes('macell')) return { macro: 'Negozi e servizi locali', sub: 'Macelleria' };
-    if(v.includes('supermarket') || v.includes('supermercat') || v.includes('grocery')) return { macro: 'Negozi e servizi locali', sub: 'Supermercato' };
-    if(v.includes('convenience')) return { macro: 'Negozi e servizi locali', sub: 'Minimarket' };
-    if(v.includes('chem') || v.includes('pharmacy') || v.includes('farmacia')) return { macro: 'Negozi e servizi locali', sub: 'Farmacia' };
-    if(v.includes('hairdresser') || v.includes('beauty') || v.includes('parrucchi')) return { macro: 'Negozi e servizi locali', sub: 'Parrucchiere / Estetica' };
-    if(v.includes('bakery') || v.includes('cafe') || v.includes('bar')) return { macro: 'Negozi e servizi locali', sub: 'Bar / Caffè' };
+    if(v.includes('supermarket') || v.includes('grocery')) return { macro: 'Negozi e servizi locali', sub: 'Supermercato / alimentari' };
+    if(v.includes('butcher')) return { macro: 'Negozi e servizi locali', sub: 'Macelleria' };
+    if(v.includes('bakery')) return { macro: 'Negozi e servizi locali', sub: 'Panetteria / pasticceria' };
+    if(v.includes('hairdresser') || v.includes('beauty')) return { macro: 'Negozi e servizi locali', sub: 'Cura persona' };
     return { macro: 'Negozi e servizi locali', sub: p.shop };
   }
-
-  // Terzo settore (charity / ngo / social)
-  if(lower(p.office).includes('charity') || lower(p.nonprofit).length || lower(p['social_facility']).length || lower(p.volunteer).length){
-    return { macro: 'Terzo settore', sub: p.office || p['social_facility'] || 'Organizzazione' };
-  }
-
-  // Uffici e PMI
-  if(p.office){
-    const v = lower(p.office);
-    if(v.includes('estate') || v.includes('agent')) return { macro: 'PMI', sub: 'Agenzia immobiliare' };
-    if(v.includes('company') || v.includes('business') || v.includes('private')) return { macro: 'PMI', sub: p.office };
-    return { macro: 'PMI', sub: p.office };
-  }
-
-  // Aree industriali / PMI manifatturiere
-  if(p['landuse'] === 'industrial' || lower(p.building).includes('industrial') || lower(p.industry)){
-    return { macro: 'PMI', sub: p.industry || 'Azienda/Industriale' };
-  }
-
-  // Servizi pubblici o collettivi
+  if(p.office) return { macro: 'Uffici e PMI', sub: p.office };
+  if(p.tourism) return { macro: 'Ospitalita e turismo', sub: p.tourism };
   if(p.amenity){
     const v = lower(p.amenity);
-    if(v.includes('school')) return { macro: 'Servizi pubblici o collettivi', sub: 'Scuola' };
-    if(v.includes('hospital') || v.includes('clinic')) return { macro: 'Servizi pubblici o collettivi', sub: 'Sanità' };
-    if(v.includes('post_office')) return { macro: 'Servizi pubblici o collettivi', sub: 'Ufficio postale' };
-    if(v.includes('library')) return { macro: 'Servizi pubblici o collettivi', sub: 'Biblioteca' };
-    if(v.includes('townhall') || v.includes('municip')) return { macro: 'Servizi pubblici o collettivi', sub: 'Municipio / Uffici pubblici' };
-    if(v.includes('police') || v.includes('fire_station')) return { macro: 'Servizi pubblici o collettivi', sub: 'Sicurezza pubblica' };
-    if(v.includes('community') || v.includes('social')) return { macro: 'Servizi pubblici o collettivi', sub: 'Centro comunitario / Servizi sociali' };
-    return { macro: 'Servizi pubblici o collettivi', sub: p.amenity };
+    if(['restaurant','bar','cafe'].includes(v)) return { macro: 'Ristorazione', sub: p.amenity };
+    if(['school','clinic','hospital','doctors','dentist','pharmacy','post_office','townhall','library','community_centre'].includes(v)) return { macro: 'Servizi pubblici o collettivi', sub: p.amenity };
+    if(['bank','fuel','marketplace'].includes(v)) return { macro: 'Servizi e commercio', sub: p.amenity };
+    return { macro: 'Servizi e commercio', sub: p.amenity };
   }
-
-  // fallback: if geometry type indicates area
-  if(p._osm_type === 'way' || p._osm_type === 'relation') return { macro: 'Altro', sub: 'Edificio/Area' };
+  if(p.landuse === 'industrial') return { macro: 'Aree produttive', sub: 'landuse=industrial' };
+  if(['commercial','industrial','retail','office','warehouse','supermarket','school','hospital'].includes(lower(p.building))){
+    return { macro: 'Edificio potenzialmente non domestico', sub: p.building };
+  }
   return { macro: '', sub: '' };
 }
+
+document.addEventListener('DOMContentLoaded', () => {
+  loadCabins();
+  document.getElementById('exportCsvBtn')?.addEventListener('click', exportCSV);
+  document.getElementById('exportPdfBtn')?.addEventListener('click', exportPDF);
+});

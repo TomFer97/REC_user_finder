@@ -3,42 +3,21 @@
   "features": [
     {
       "type": "Feature",
-      "id": 1,
-      "geometry": {
-        "type": "Point",
-        "coordinates": [12.496366, 41.902782]
-      },
-      "properties": {
-        "COD_AC": "AC001E01397",
-        "NOME": "Cabina AC001E01397",
-        "COMUNE": "Roma"
-      }
+      "id": "VAPRIO-NORD",
+      "geometry": { "type": "Point", "coordinates": [9.5268, 45.5855] },
+      "properties": { "COD_AC": "VAPRIO-NORD", "NOME": "Area Vaprio Nord", "COMUNE": "Vaprio d Adda", "NOTE": "Area preliminare da sostituire con poligono GSE ufficiale" }
     },
     {
       "type": "Feature",
-      "id": 2,
-      "geometry": {
-        "type": "Point",
-        "coordinates": [12.496, 41.903]
-      },
-      "properties": {
-        "COD_AC": "AC001E01398",
-        "NOME": "Cabina AC001E01398",
-        "COMUNE": "Roma"
-      }
+      "id": "VAPRIO-CENTRO",
+      "geometry": { "type": "Point", "coordinates": [9.5251, 45.5766] },
+      "properties": { "COD_AC": "VAPRIO-CENTRO", "NOME": "Area Vaprio Centro", "COMUNE": "Vaprio d Adda", "NOTE": "Area preliminare da sostituire con poligono GSE ufficiale" }
     },
     {
       "type": "Feature",
-      "id": 3,
-      "geometry": {
-        "type": "Point",
-        "coordinates": [12.497, 41.902]
-      },
-      "properties": {
-        "COD_AC": "AC001E01364",
-        "NOME": "Cabina AC001E01364",
-        "COMUNE": "Roma"
-      }
+      "id": "VAPRIO-SUD",
+      "geometry": { "type": "Point", "coordinates": [9.5219, 45.5678] },
+      "properties": { "COD_AC": "VAPRIO-SUD", "NOME": "Area Vaprio Sud", "COMUNE": "Vaprio d Adda", "NOTE": "Area preliminare da sostituire con poligono GSE ufficiale" }
     }
   ]
 }

@@ -2,7 +2,7 @@
   "name": "rec-user-finding",
   "version": "0.1.0",
   "private": true,
-  "description": "Backend proxy for GSE cabina primaria map queries.",
+  "description": "Backend proxy and webapp to identify potential non-domestic REC users in Vaprio d Adda.",
   "main": "server.js",
   "scripts": {
     "start": "node server.js",

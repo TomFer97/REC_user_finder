@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width,initial-scale=1">
-  <title>Mappa Cabine Primarie - Demo</title>
+  <title>Vaprioenergy - Potenziali utenti non domestici</title>
   <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
   <link rel="stylesheet" href="style.css">
 </head>
@@ -11,63 +11,65 @@
   <div id="sidebar">
     <div id="appHeader">
       <h1>CER Vaprioenergy</h1>
-      <div class="subtitle">Mappa per coinvolgimento membri della comunità energetica</div>
+      <div class="subtitle">Mappatura preliminare di potenziali utenti non domestici</div>
     </div>
-    <h2>Cabine primarie</h2>
-    <ul id="cabinsList"></ul>
-    <div id="controls">
-      <label for="radiusInput">Raggio (m):</label>
-      <input id="radiusInput" type="number" value="500" min="50" step="50" style="width:100%" />
-      <button id="searchPodBtn" style="margin-top:8px;width:100%">Cerca POD intorno al centro mappa</button>
-    </div>
-    <div style="margin-top:12px">
-      <strong>Seleziona AC rapida</strong>
-      <div style="display:flex;flex-direction:column;margin-top:6px">
-        <button class="ac-btn" data-code="AC001E01397">AC001E01397</button>
-        <button class="ac-btn" data-code="AC001E01398">AC001E01398</button>
-        <button class="ac-btn" data-code="AC001E01364">AC001E01364</button>
+
+    <section class="panel">
+      <h2>Aree cabina</h2>
+      <p class="hint">Seleziona un'area per interrogare OpenStreetMap e generare una lista esportabile di target per outreach.</p>
+      <ul id="cabinsList"></ul>
+      <div class="quick-actions">
+        <button class="ac-btn" data-code="VAPRIO-NORD">Vaprio Nord</button>
+        <button class="ac-btn" data-code="VAPRIO-CENTRO">Vaprio Centro</button>
+        <button class="ac-btn" data-code="VAPRIO-SUD">Vaprio Sud</button>
       </div>
-    </div>
-    <div id="results" style="margin-top:12px">
-      <h3>Risultati OSM</h3>
-      <div style="display:flex;gap:8px;margin-bottom:8px;align-items:center">
-        <select id="exportPreset" style="padding:6px">
-          <option value="minimal">Minimal (nome, categoria, id)</option>
-          <option value="withCategory" selected>Con categoria (consigliato)</option>
-          <option value="all">Tutte le colonne</option>
+    </section>
+
+    <section class="panel">
+      <h2>Export</h2>
+      <div class="controls-row">
+        <select id="exportPreset">
+          <option value="outreach" selected>Outreach CER</option>
+          <option value="minimal">Minimal</option>
+          <option value="all">Colonne personalizzate</option>
         </select>
-        <button id="exportCsvBtn">Esporta CSV</button>
-        <button id="exportPdfBtn">Esporta PDF</button>
+        <button id="exportCsvBtn">CSV</button>
+        <button id="exportPdfBtn">PDF</button>
       </div>
-      <div id="columnsSelector" style="margin-bottom:8px">
-        <strong>Seleziona colonne da esportare</strong>
-        <div style="display:flex;flex-wrap:wrap;gap:6px;margin-top:6px">
-          <label><input type="checkbox" data-col="name" checked> Nome</label>
-          <label><input type="checkbox" data-col="category_macro" checked> Macro categoria</label>
-          <label><input type="checkbox" data-col="category_sub" checked> Sotto-categoria</label>
-          <label><input type="checkbox" data-col="shop"> Shop</label>
-          <label><input type="checkbox" data-col="craft"> Craft</label>
-          <label><input type="checkbox" data-col="office"> Office</label>
-          <label><input type="checkbox" data-col="amenity"> Amenity</label>
-          <label><input type="checkbox" data-col="phone"> Phone</label>
-          <label><input type="checkbox" data-col="website"> Website</label>
-          <label><input type="checkbox" data-col="addr:street"> Via</label>
-          <label><input type="checkbox" data-col="addr:city"> Città</label>
-          <label><input type="checkbox" data-col="_osm_type" checked> OSM Type</label>
-          <label><input type="checkbox" data-col="_osm_id" checked> OSM ID</label>
-        </div>
+      <div id="columnsSelector">
+        <label><input type="checkbox" data-col="cabina_cod_ac" checked> Cabina</label>
+        <label><input type="checkbox" data-col="outreach_name" checked> Nome</label>
+        <label><input type="checkbox" data-col="category_macro" checked> Categoria</label>
+        <label><input type="checkbox" data-col="category_sub" checked> Sotto-categoria</label>
+        <label><input type="checkbox" data-col="address" checked> Indirizzo</label>
+        <label><input type="checkbox" data-col="phone"> Telefono</label>
+        <label><input type="checkbox" data-col="website"> Sito</label>
+        <label><input type="checkbox" data-col="email"> Email</label>
+        <label><input type="checkbox" data-col="lat" checked> Lat</label>
+        <label><input type="checkbox" data-col="lon" checked> Lon</label>
+        <label><input type="checkbox" data-col="confidence" checked> Confidenza</label>
+        <label><input type="checkbox" data-col="note_verifica"> Note</label>
+        <label><input type="checkbox" data-col="_osm_type"> OSM type</label>
+        <label><input type="checkbox" data-col="_osm_id"> OSM ID</label>
       </div>
-      <div id="resultsList" style="max-height:220px;overflow:auto"></div>
-    </div>
-    <div id="info">Seleziona una cabina per limitare l'analisi.</div>
+    </section>
+
+    <section class="panel">
+      <h2>Risultati</h2>
+      <div id="resultsList"></div>
+    </section>
+
+    <div id="info">Caricamento dati...</div>
   </div>
+
   <div id="appFooter">
     <img id="ceahLogo" src="images/ceah_logo.png" alt="Citizen Energy Advisory Hub" />
     <div class="credits">
-      <div>Strumento realizzato con il supporto di Citizen Energy Advisory Hub</div>
-      <div>Esperto tecnico: Tommaso Ferrucci</div>
+      <div>Strumento preliminare per supporto tecnico CER</div>
+      <div>Fonte target: OpenStreetMap/Overpass, da verificare prima del contatto</div>
     </div>
   </div>
+
   <div id="map"></div>
 
   <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>

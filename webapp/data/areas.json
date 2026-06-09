@@ -1,72 +1,39 @@
 {
-  "AC001E01397": {
+  "VAPRIO-NORD": {
     "type": "FeatureCollection",
     "features": [
       {
         "type": "Feature",
-        "properties": {
-          "COD_AC": "AC001E01397",
-          "NOME": "Cabina AC001E01397"
-        },
+        "properties": { "COD_AC": "VAPRIO-NORD", "NOME": "Area Vaprio Nord", "NOTE": "Poligono preliminare: sostituire con area convenzionale GSE ufficiale quando disponibile" },
         "geometry": {
           "type": "Polygon",
-          "coordinates": [
-            [
-              [12.490, 41.898],
-              [12.503, 41.898],
-              [12.503, 41.908],
-              [12.490, 41.908],
-              [12.490, 41.898]
-            ]
-          ]
+          "coordinates": [[[9.5100,45.5790],[9.5420,45.5790],[9.5420,45.5945],[9.5100,45.5945],[9.5100,45.5790]]]
         }
       }
     ]
   },
-  "AC001E01398": {
+  "VAPRIO-CENTRO": {
     "type": "FeatureCollection",
     "features": [
       {
         "type": "Feature",
-        "properties": {
-          "COD_AC": "AC001E01398",
-          "NOME": "Cabina AC001E01398"
-        },
+        "properties": { "COD_AC": "VAPRIO-CENTRO", "NOME": "Area Vaprio Centro", "NOTE": "Poligono preliminare: sostituire con area convenzionale GSE ufficiale quando disponibile" },
         "geometry": {
           "type": "Polygon",
-          "coordinates": [
-            [
-              [12.485, 41.900],
-              [12.498, 41.900],
-              [12.498, 41.910],
-              [12.485, 41.910],
-              [12.485, 41.900]
-            ]
-          ]
+          "coordinates": [[[9.5080,45.5700],[9.5410,45.5700],[9.5410,45.5820],[9.5080,45.5820],[9.5080,45.5700]]]
         }
       }
     ]
   },
-  "AC001E01364": {
+  "VAPRIO-SUD": {
     "type": "FeatureCollection",
     "features": [
       {
         "type": "Feature",
-        "properties": {
-          "COD_AC": "AC001E01364",
-          "NOME": "Cabina AC001E01364"
-        },
+        "properties": { "COD_AC": "VAPRIO-SUD", "NOME": "Area Vaprio Sud", "NOTE": "Poligono preliminare: sostituire con area convenzionale GSE ufficiale quando disponibile" },
         "geometry": {
           "type": "Polygon",
-          "coordinates": [
-            [
-              [12.495, 41.895],
-              [12.508, 41.895],
-              [12.508, 41.905],
-              [12.495, 41.905],
-              [12.495, 41.895]
-            ]
-          ]
+          "coordinates": [[[9.5050,45.5580],[9.5360,45.5580],[9.5360,45.5720],[9.5050,45.5720],[9.5050,45.5580]]]
         }
       }
     ]

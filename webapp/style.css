@@ -1,31 +1,31 @@
-html,body,#map{height:100%;margin:0;padding:0}
-#map{position:fixed;right:0;top:0;bottom:0;left:300px}
-#sidebar{position:fixed;left:0;top:0;bottom:0;width:300px;overflow:auto;padding:12px;background:#f7f7f7;border-right:1px solid #ddd}
+html,body,#map{height:100%;margin:0;padding:0;font-family:Arial,Helvetica,sans-serif}
+#map{position:fixed;right:0;top:0;bottom:0;left:340px}
+#sidebar{position:fixed;left:0;top:0;bottom:56px;width:316px;overflow:auto;padding:12px;background:#f7f9fc;border-right:1px solid #d9e2ef;z-index:1000}
+:root{--ceah-blue:#1a73e8;--ceah-green:#7fb800;--text:#263238;--muted:#667085}
+#appHeader h1{margin:0;font-size:20px;color:var(--ceah-blue)}
+#appHeader .subtitle{font-size:12px;color:var(--ceah-green);margin:4px 0 12px}
+.panel{background:#fff;border:1px solid #e5eaf1;border-radius:8px;padding:10px;margin-bottom:10px;box-shadow:0 1px 2px rgba(16,24,40,.04)}
+h2{font-size:15px;margin:0 0 8px;color:var(--text)}
+.hint{font-size:12px;color:var(--muted);line-height:1.35;margin:0 0 8px}
 #cabinsList{list-style:none;padding:0;margin:8px 0}
-#cabinsList li{padding:6px;border-radius:4px;cursor:pointer}
-#cabinsList li:hover{background:#e6f0ff}
-#cabinsList li.active{background:#cfe4ff;font-weight:600}
-#info{margin-top:12px;color:#555;font-size:14px}
-
-:root{
-	--ceah-blue: #1a73e8;
-	--ceah-green: #7fb800;
-}
-
-#appHeader h1{margin:0;font-size:18px;color:var(--ceah-blue)}
-#appHeader .subtitle{font-size:12px;color:var(--ceah-green);margin-bottom:8px}
-
-#appFooter{position:fixed;left:0;right:0;bottom:0;height:56px;background:#fff;border-top:1px solid #eee;display:flex;align-items:center;gap:12px;padding:8px 12px;font-size:12px;color:#444}
+#cabinsList li{padding:8px;border-radius:6px;cursor:pointer;border:1px solid transparent;font-size:13px}
+#cabinsList li:hover{background:#eaf2ff;border-color:#c7dcff}
+#cabinsList li.active,.ac-btn.active{background:#cfe4ff;font-weight:600;color:#0b4da2}
+.quick-actions{display:flex;flex-direction:column;gap:6px;margin-top:8px}
+.controls-row{display:flex;gap:6px;align-items:center;margin-bottom:8px}
+#columnsSelector{display:flex;flex-wrap:wrap;gap:6px;font-size:12px;color:var(--text)}
+#columnsSelector label{background:#f2f4f7;border:1px solid #e4e7ec;border-radius:4px;padding:4px 6px;color:var(--text)}
+#resultsList{max-height:260px;overflow:auto;font-size:13px}
+.result-item{padding:8px 4px;border-bottom:1px solid #edf0f5}
+.result-item small{color:#475467;line-height:1.35}
+#info{margin-top:12px;color:#555;font-size:13px;line-height:1.35;background:#fff;border-left:4px solid var(--ceah-blue);padding:8px;border-radius:4px}
+#appFooter{position:fixed;left:0;right:0;bottom:0;height:40px;background:#fff;border-top:1px solid #eee;display:flex;align-items:center;gap:12px;padding:8px 12px;font-size:11px;color:#444;z-index:1001}
 #appFooter .credits{display:flex;flex-direction:column}
-#appFooter img#ceahLogo{height:40px}
-
-/* highlight for building rooftops */
-.building-highlight{fill:#ffeb3b;fill-opacity:0.6;stroke:#d4a600;stroke-width:1}
-
-/* buttons / controls style using CEAH colors */
-button{background:#fff;border:1px solid var(--ceah-blue);color:var(--ceah-blue);padding:6px 8px;border-radius:4px;cursor:pointer}
+#appFooter img#ceahLogo{height:34px}
+button{background:#fff;border:1px solid var(--ceah-blue);color:var(--ceah-blue);padding:7px 9px;border-radius:5px;cursor:pointer;font-size:13px}
 button:hover{background:var(--ceah-blue);color:#fff}
-select, input[type=number]{border:1px solid #ddd;padding:6px;border-radius:4px}
-label{color:var(--ceah-blue)}
-.ac-btn{background:#fff;border:1px solid var(--ceah-green);color:var(--ceah-green);padding:6px;margin-bottom:6px;border-radius:4px}
+select{border:1px solid #d0d5dd;padding:7px;border-radius:5px;max-width:145px}
+.ac-btn{border-color:var(--ceah-green);color:var(--ceah-green)}
 .ac-btn:hover{background:var(--ceah-green);color:#fff}
+.leaflet-popup-content{font-size:13px;line-height:1.35}
+@media (max-width:800px){#sidebar{width:280px}#map{left:304px}}
