@@ -296,3 +296,4 @@ document.addEventListener('DOMContentLoaded', () => {
   document.getElementById('exportCsvBtn')?.addEventListener('click', exportCSV);
   document.getElementById('exportPdfBtn')?.addEventListener('click', exportPDF);
 });
+
