@@ -4,6 +4,8 @@ L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',{maxZoom:19,att
 let selectedLayer, resultsLayer;
 let osmResults = [];
 let selectedCabinCode = '';
+let largeEnterpriseRules = [];
+let excludedLargeEnterpriseResults = [];
 
 const officialGseAreas = [
   {
@@ -61,6 +63,16 @@ async function fetchJson(url, options){
   return response.json();
 }
 
+async function loadLargeEnterpriseRules(){
+  try{
+    const data = await fetchJson('data/large-enterprises.json');
+    largeEnterpriseRules = Array.isArray(data.rules) ? data.rules : [];
+  }catch(err){
+    console.warn('Filtro grandi imprese non caricato:', err.message);
+    largeEnterpriseRules = [];
+  }
+}
+
 function loadCabins(){
   const ul = document.getElementById('cabinsList');
   if(ul){
@@ -93,6 +105,32 @@ async function fetchOfficialGseArea(area){
   return data;
 }
 
+function largeEnterpriseMatch(feature){
+  if(!window.LargeEnterpriseFilter) return null;
+  return window.LargeEnterpriseFilter.findRule(feature.properties || {}, largeEnterpriseRules);
+}
+
+function filterLargeEnterprises(features){
+  const kept = [];
+  const excluded = [];
+
+  features.forEach(feature => {
+    const match = largeEnterpriseMatch(feature);
+    if(match){
+      excluded.push(Object.assign({}, feature, {
+        properties: Object.assign({}, feature.properties || {}, {
+          large_enterprise_match: match.label,
+          large_enterprise_reason: match.reason
+        })
+      }));
+    }else{
+      kept.push(feature);
+    }
+  });
+
+  return { kept, excluded };
+}
+
 async function selectOfficialGseArea(area, trigger){
   try{
     selectedCabinCode = area.code;
@@ -114,8 +152,13 @@ async function selectOfficialGseArea(area, trigger){
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ geojson: feature.geometry })
     });
-    osmResults = enrichFeatures(osm.features || [], area.code);
-    renderResults(osmResults, osm.meta || {});
+    const enrichedResults = enrichFeatures(osm.features || [], area.code);
+    const filteredResults = filterLargeEnterprises(enrichedResults);
+    excludedLargeEnterpriseResults = filteredResults.excluded;
+    osmResults = filteredResults.kept;
+    renderResults(osmResults, osm.meta || {}, {
+      excludedLargeEnterprises: excludedLargeEnterpriseResults.length
+    });
   }catch(err){
     setInfo('Errore: ' + err.message);
   }
@@ -226,7 +269,7 @@ function calculateOutreachPriority(p, cat){
   return 'bassa';
 }
 
-function renderResults(features, meta){
+function renderResults(features, meta, filterMeta = {}){
   if(resultsLayer) resultsLayer.remove();
   resultsLayer = L.geoJSON(features, {
     pointToLayer: (f, latlng) => L.circleMarker(latlng, markerStyleForFeature(f)),
@@ -238,7 +281,9 @@ function renderResults(features, meta){
   try{ if(features.length) map.fitBounds(resultsLayer.getBounds().pad(0.2)); }catch(e){}
   populateLongList(features);
   const source = meta.source === 'mock' ? 'mock' : 'OpenStreetMap/Overpass';
-  setInfo('Trovati ' + features.length + ' potenziali utenti non domestici. Fonte area: GSE. Fonte target: ' + source + '.');
+  const excluded = filterMeta.excludedLargeEnterprises || 0;
+  const filterText = excluded ? ' Escluse ' + excluded + ' grandi imprese/insegne nazionali dal filtro CER.' : '';
+  setInfo('Trovati ' + features.length + ' potenziali utenti non domestici. Fonte area: GSE. Fonte target: ' + source + '.' + filterText);
 }
 
 function populateLongList(features){
@@ -371,7 +416,8 @@ function categorizeFeature(p){
   return { macro: '', sub: '' };
 }
 
-document.addEventListener('DOMContentLoaded', () => {
+document.addEventListener('DOMContentLoaded', async () => {
+  await loadLargeEnterpriseRules();
   loadCabins();
   document.getElementById('exportCsvBtn')?.addEventListener('click', exportCSV);
   document.getElementById('exportPdfBtn')?.addEventListener('click', exportPDF);
