@@ -6,7 +6,7 @@
   "main": "server.js",
   "scripts": {
     "start": "node server.js",
-    "test": "node --check server.js && node --check webapp/main.js"
+    "test": "node --check server.js && node --check webapp/main.js && node --check webapp/large-enterprise-filter.js && node tests/large-enterprise-filter.test.js"
   },
   "dependencies": {
     "cors": "^2.8.5",
