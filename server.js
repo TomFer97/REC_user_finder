@@ -102,6 +102,36 @@ function ringToOverpassPoly(ring, maxPoints = 90) {
     .join(' ');
 }
 
+const nonResidentialAmenityValues = [
+  'school', 'kindergarten', 'college', 'university',
+  'clinic', 'hospital', 'doctors', 'dentist', 'pharmacy',
+  'post_office', 'townhall', 'library', 'community_centre',
+  'social_facility', 'nursing_home', 'fire_station', 'police',
+  'theatre', 'cinema', 'arts_centre', 'place_of_worship',
+  'restaurant', 'bar', 'cafe', 'fuel', 'bank', 'marketplace',
+  'charging_station', 'bus_station', 'public_building'
+];
+
+const nonResidentialBuildingValues = [
+  'commercial', 'industrial', 'retail', 'office', 'warehouse',
+  'supermarket', 'school', 'kindergarten', 'college', 'university',
+  'hospital', 'civic', 'public', 'government', 'sports_centre',
+  'stadium', 'train_station', 'transportation', 'hotel', 'church',
+  'religious', 'mosque', 'temple', 'synagogue', 'chapel', 'fire_station'
+];
+
+const nonResidentialLeisureValues = [
+  'sports_centre', 'fitness_centre', 'stadium', 'swimming_pool'
+];
+
+const nonResidentialLanduseValues = [
+  'industrial', 'commercial', 'retail'
+];
+
+function overpassRegex(values) {
+  return values.join('|');
+}
+
 function buildNonResidentialQuery(poly) {
   return `
 [out:json][timeout:45];
@@ -110,9 +140,14 @@ function buildNonResidentialQuery(poly) {
   nwr["craft"](poly:"${poly}");
   nwr["office"](poly:"${poly}");
   nwr["tourism"](poly:"${poly}");
-  nwr["amenity"~"school|clinic|hospital|doctors|dentist|pharmacy|post_office|townhall|library|community_centre|restaurant|bar|cafe|fuel|bank|marketplace"](poly:"${poly}");
-  nwr["building"~"commercial|industrial|retail|office|warehouse|supermarket|school|hospital"](poly:"${poly}");
-  nwr["landuse"="industrial"](poly:"${poly}");
+  nwr["healthcare"](poly:"${poly}");
+  nwr["amenity"~"${overpassRegex(nonResidentialAmenityValues)}"](poly:"${poly}");
+  nwr["leisure"~"${overpassRegex(nonResidentialLeisureValues)}"](poly:"${poly}");
+  nwr["public_transport"="station"](poly:"${poly}");
+  nwr["railway"="station"](poly:"${poly}");
+  nwr["man_made"="works"](poly:"${poly}");
+  nwr["building"~"${overpassRegex(nonResidentialBuildingValues)}"](poly:"${poly}");
+  nwr["landuse"~"${overpassRegex(nonResidentialLanduseValues)}"](poly:"${poly}");
 )->.targets;
 (
   way["building"](poly:"${poly}");
@@ -167,23 +202,20 @@ async function fetchOverpassWithFallback(query) {
   );
 }
 
-const nonResidentialAmenities = new Set([
-  'school', 'clinic', 'hospital', 'doctors', 'dentist', 'pharmacy',
-  'post_office', 'townhall', 'library', 'community_centre', 'restaurant',
-  'bar', 'cafe', 'fuel', 'bank', 'marketplace'
-]);
-
-const nonResidentialBuildings = new Set([
-  'commercial', 'industrial', 'retail', 'office', 'warehouse', 'supermarket',
-  'school', 'hospital'
-]);
+const nonResidentialAmenities = new Set(nonResidentialAmenityValues);
+const nonResidentialBuildings = new Set(nonResidentialBuildingValues);
+const nonResidentialLeisure = new Set(nonResidentialLeisureValues);
+const nonResidentialLanduse = new Set(nonResidentialLanduseValues);
 
 function isTargetElement(el) {
   const tags = el.tags || {};
-  if (tags.shop || tags.craft || tags.office || tags.tourism) return true;
+  if (tags.shop || tags.craft || tags.office || tags.tourism || tags.healthcare) return true;
   if (tags.amenity && nonResidentialAmenities.has(tags.amenity)) return true;
+  if (tags.leisure && nonResidentialLeisure.has(tags.leisure)) return true;
+  if (tags.public_transport === 'station' || tags.railway === 'station') return true;
+  if (tags.man_made === 'works') return true;
   if (tags.building && nonResidentialBuildings.has(tags.building)) return true;
-  if (tags.landuse === 'industrial') return true;
+  if (tags.landuse && nonResidentialLanduse.has(tags.landuse)) return true;
   return false;
 }
 
@@ -407,15 +439,20 @@ function overpassElementToFeature(el, buildingMatch) {
 }
 
 function estimateConfidence(tags) {
-  if (tags.shop || tags.craft || tags.office || tags.amenity || tags.tourism) return 'alta';
   if (
-    tags.building === 'commercial' ||
-    tags.building === 'industrial' ||
-    tags.building === 'retail' ||
-    tags.building === 'office' ||
-    tags.building === 'warehouse'
-  ) return 'media';
-  if (tags.landuse === 'industrial') return 'media';
+    tags.shop ||
+    tags.craft ||
+    tags.office ||
+    tags.amenity ||
+    tags.tourism ||
+    tags.healthcare ||
+    (tags.leisure && nonResidentialLeisure.has(tags.leisure)) ||
+    tags.public_transport === 'station' ||
+    tags.railway === 'station'
+  ) return 'alta';
+  if (tags.building && nonResidentialBuildings.has(tags.building)) return 'media';
+  if (tags.landuse && nonResidentialLanduse.has(tags.landuse)) return 'media';
+  if (tags.man_made === 'works') return 'media';
   return 'bassa';
 }
 

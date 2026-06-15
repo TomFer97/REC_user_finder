@@ -6,9 +6,9 @@ L'app consente di:
 
 - selezionare una delle tre aree ufficiali GSE di riferimento per Vaprioenergy;
 - interrogare OpenStreetMap tramite Overpass per trovare potenziali utenze non domestiche;
-- classificare i risultati per macro-categoria utile all'outreach;
+- classificare negozi, uffici, PMI, servizi pubblici, scuole, sanita, sport, trasporti e altri grandi edifici non domestici;
 - stimare la superficie dell'edificio quando OSM fornisce una geometria o un edificio associabile;
-- escludere dalla mappa e dagli export i candidati riconducibili a grandi imprese/insegne nazionali;
+- escludere dalla mappa e dagli export gli enti presenti nella lista scarti configurabile;
 - esportare una lista CSV/PDF per le successive verifiche manuali.
 
 > Nota: le aree GSE vengono caricate tramite il proxy backend `/api/gse-area`, usando il layer ArcGIS reale `AC_Comuni/FeatureServer/21`.
@@ -48,21 +48,31 @@ Di default l'app prova a usare Overpass reale.
 ## Dati principali
 
 - `/api/gse-area`: proxy backend per le geometrie ufficiali GSE.
-- `/api/osm-search`: ricerca Overpass su target non domestici e geometrie edificio.
-- `webapp/data/large-enterprises.json`: lista configurabile di grandi imprese/insegne da escludere.
+- `/api/osm-search`: ricerca Overpass su target non domestici, spazi pubblici/collettivi e geometrie edificio.
+- `webapp/data/excluded-entities.json`: lista configurabile di enti, insegne o operatori da scartare.
 - `webapp/data/cabins.json` e `webapp/data/areas.json`: dati legacy non usati dalla UI principale.
 - `webapp/data/osm-mock.json`: dati demo usati solo con `USE_MOCK_OSM=true`.
 
-## Filtro grandi imprese
+## Lista scarti
 
 Le comunita energetiche non includono grandi imprese. La definizione operativa usata dal filtro segue la soglia indicata per lo screening: oltre 250 dipendenti e oltre 50 milioni di fatturato.
 
 OpenStreetMap di norma non pubblica dipendenti e fatturato dei singoli esercizi. Per questo l'app applica due controlli:
 
 - se un record contiene dati espliciti di dipendenti/fatturato, li usa per escludere il target;
-- altrimenti esclude i risultati che combaciano con la lista locale `webapp/data/large-enterprises.json`, basata su brand, insegna, network o operatore.
+- altrimenti esclude i risultati che combaciano con la lista locale `webapp/data/excluded-entities.json`, basata su brand, insegna, network, nome, owner o operatore.
+
+Per aggiungere un ente da scartare basta inserire una nuova regola in `rules`, ad esempio:
+
+```json
+{ "label": "Nome Ente", "category": "Grande impresa", "reason": "Scarto manuale", "terms": ["nome ente"] }
+```
 
 Il filtro serve a rendere piu pulita la mappa e l'export, ma la qualificazione finale dell'impresa va verificata prima di contatti o valutazioni formali.
+
+## Target cercati
+
+La ricerca Overpass include negozi, artigiani, uffici, turismo, ristorazione, aree produttive/commerciali, scuole, universita, sanita, servizi pubblici, biblioteche, centri civici, impianti sportivi, trasporti e altri edifici non domestici. I tetti grandi aumentano la priorita del target e vengono mantenuti anche quando il nome OSM e' incompleto.
 
 ## Export
 
