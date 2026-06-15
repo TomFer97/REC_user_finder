@@ -4,8 +4,10 @@ L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',{maxZoom:19,att
 let selectedLayer, resultsLayer;
 let osmResults = [];
 let selectedCabinCode = '';
-let largeEnterpriseRules = [];
-let excludedLargeEnterpriseResults = [];
+let excludedEntityConfig = { rules: [] };
+let excludedEntityResults = [];
+
+const MIN_LARGE_ROOF_CANDIDATE_M2 = 750;
 
 const officialGseAreas = [
   {
@@ -63,13 +65,13 @@ async function fetchJson(url, options){
   return response.json();
 }
 
-async function loadLargeEnterpriseRules(){
+async function loadExcludedEntityRules(){
   try{
-    const data = await fetchJson('data/large-enterprises.json');
-    largeEnterpriseRules = Array.isArray(data.rules) ? data.rules : [];
+    const data = await fetchJson('data/excluded-entities.json');
+    excludedEntityConfig = data && Array.isArray(data.rules) ? data : { rules: [] };
   }catch(err){
-    console.warn('Filtro grandi imprese non caricato:', err.message);
-    largeEnterpriseRules = [];
+    console.warn('Lista enti esclusi non caricata:', err.message);
+    excludedEntityConfig = { rules: [] };
   }
 }
 
@@ -105,22 +107,24 @@ async function fetchOfficialGseArea(area){
   return data;
 }
 
-function largeEnterpriseMatch(feature){
-  if(!window.LargeEnterpriseFilter) return null;
-  return window.LargeEnterpriseFilter.findRule(feature.properties || {}, largeEnterpriseRules);
+function excludedEntityMatch(feature){
+  const filter = window.EntityExclusionFilter || window.LargeEnterpriseFilter;
+  if(!filter) return null;
+  return filter.findRule(feature.properties || {}, excludedEntityConfig);
 }
 
-function filterLargeEnterprises(features){
+function filterExcludedEntities(features){
   const kept = [];
   const excluded = [];
 
   features.forEach(feature => {
-    const match = largeEnterpriseMatch(feature);
+    const match = excludedEntityMatch(feature);
     if(match){
       excluded.push(Object.assign({}, feature, {
         properties: Object.assign({}, feature.properties || {}, {
-          large_enterprise_match: match.label,
-          large_enterprise_reason: match.reason
+          excluded_entity_match: match.label,
+          excluded_entity_reason: match.reason,
+          excluded_entity_category: match.category
         })
       }));
     }else{
@@ -153,11 +157,11 @@ async function selectOfficialGseArea(area, trigger){
       body: JSON.stringify({ geojson: feature.geometry })
     });
     const enrichedResults = enrichFeatures(osm.features || [], area.code);
-    const filteredResults = filterLargeEnterprises(enrichedResults);
-    excludedLargeEnterpriseResults = filteredResults.excluded;
+    const filteredResults = filterExcludedEntities(enrichedResults);
+    excludedEntityResults = filteredResults.excluded;
     osmResults = filteredResults.kept;
     renderResults(osmResults, osm.meta || {}, {
-      excludedLargeEnterprises: excludedLargeEnterpriseResults.length
+      excludedEntities: excludedEntityResults.length
     });
   }catch(err){
     setInfo('Errore: ' + err.message);
@@ -181,7 +185,7 @@ function enrichFeatures(features, code){
           lat: coords.lat,
           lon: coords.lon,
           address,
-          outreach_name: p.name || p.operator || p.brand || p.shop || p.craft || p.office || p.amenity || p.building || 'Da verificare',
+          outreach_name: p.name || p.operator || p.brand || p.shop || p.craft || p.office || p.amenity || p.leisure || p.tourism || p.healthcare || p.building || p.landuse || 'Da verificare',
           priorita_outreach: priority,
           building_area_m2: buildingArea || '',
           building_area_label: formatBuildingArea(buildingArea),
@@ -191,7 +195,7 @@ function enrichFeatures(features, code){
     })
     .filter(f => {
       const p = f.properties || {};
-      return p.category_macro && (p.outreach_name !== 'Da verificare' || p.confidence !== 'bassa');
+      return p.category_macro && (p.outreach_name !== 'Da verificare' || p.confidence !== 'bassa' || isLargeRoofCandidate(p));
     })
     .sort((a,b) => priorityRank(a.properties.priorita_outreach) - priorityRank(b.properties.priorita_outreach) || getBuildingArea(b.properties) - getBuildingArea(a.properties) || String(a.properties.category_macro).localeCompare(String(b.properties.category_macro)) || String(a.properties.outreach_name).localeCompare(String(b.properties.outreach_name)));
 }
@@ -206,6 +210,10 @@ function getBuildingArea(properties){
   const value = properties && properties.building_area_m2;
   const area = Number(value);
   return Number.isFinite(area) && area > 0 ? area : 0;
+}
+
+function isLargeRoofCandidate(properties){
+  return getBuildingArea(properties) >= MIN_LARGE_ROOF_CANDIDATE_M2;
 }
 
 function formatBuildingArea(area){
@@ -249,6 +257,7 @@ function formatAddress(p){
 function buildVerificationNote(p, cat){
   if(!p.name && !p.operator && !p.brand) return 'Nome non disponibile in OSM: verificare manualmente prima del contatto.';
   if(cat.macro === 'Edificio potenzialmente non domestico') return 'Classificazione basata su tag edificio: verificare occupante/attivita.';
+  if(['Istruzione e formazione','Sanita e assistenza','Spazi pubblici e collettivi','Sport e tempo libero'].includes(cat.macro)) return 'Target collettivo/pubblico: verificare gestore, POD e disponibilita della copertura.';
   return 'Potenziale utenza non domestica identificata da tag OSM.';
 }
 
@@ -257,8 +266,12 @@ function calculateOutreachPriority(p, cat){
   const macro = (cat.macro || '').toLowerCase();
   const sub = (cat.sub || '').toLowerCase();
   const confidence = (p.confidence || '').toLowerCase();
-  if(['negozi e servizi locali','artigiani e laboratori','uffici e pmi','servizi pubblici o collettivi'].includes(macro)) score += 2;
-  if(sub.includes('supermercato') || sub.includes('alimentari') || sub.includes('macelleria') || sub.includes('panetteria') || sub.includes('farmacia') || sub.includes('scuola')) score += 2;
+  const area = getBuildingArea(p);
+  if(['negozi e servizi locali','artigiani e laboratori','uffici e pmi','servizi pubblici e collettivi','spazi pubblici e collettivi','istruzione e formazione','sanita e assistenza','sport e tempo libero'].includes(macro)) score += 2;
+  if(sub.includes('supermercato') || sub.includes('alimentari') || sub.includes('macelleria') || sub.includes('panetteria') || sub.includes('farmacia') || sub.includes('scuola') || sub.includes('university') || sub.includes('sports') || sub.includes('hospital')) score += 2;
+  if(area >= 3000) score += 3;
+  else if(area >= 1500) score += 2;
+  else if(area >= MIN_LARGE_ROOF_CANDIDATE_M2) score += 1;
   if(p.name || p.operator || p.brand) score += 1;
   if(p['addr:street'] || p.address) score += 1;
   if(p.phone || p['contact:phone'] || p.email || p.website || p.url) score += 1;
@@ -281,8 +294,8 @@ function renderResults(features, meta, filterMeta = {}){
   try{ if(features.length) map.fitBounds(resultsLayer.getBounds().pad(0.2)); }catch(e){}
   populateLongList(features);
   const source = meta.source === 'mock' ? 'mock' : 'OpenStreetMap/Overpass';
-  const excluded = filterMeta.excludedLargeEnterprises || 0;
-  const filterText = excluded ? ' Escluse ' + excluded + ' grandi imprese/insegne nazionali dal filtro CER.' : '';
+  const excluded = filterMeta.excludedEntities || 0;
+  const filterText = excluded ? ' Esclusi ' + excluded + ' enti/insegne dalla lista scarti CER.' : '';
   setInfo('Trovati ' + features.length + ' potenziali utenti non domestici. Fonte area: GSE. Fonte target: ' + source + '.' + filterText);
 }
 
@@ -384,6 +397,16 @@ async function exportPDF(){
 
 function categorizeFeature(p){
   const lower = (s) => (s || '').toString().toLowerCase();
+  const educationAmenities = ['school','kindergarten','college','university'];
+  const healthAmenities = ['clinic','hospital','doctors','dentist','pharmacy'];
+  const publicAmenities = ['post_office','townhall','library','community_centre','social_facility','nursing_home','fire_station','police','public_building'];
+  const cultureAmenities = ['theatre','cinema','arts_centre','place_of_worship'];
+  const serviceAmenities = ['bank','fuel','marketplace','charging_station','bus_station'];
+  const educationBuildings = ['school','kindergarten','college','university'];
+  const healthBuildings = ['hospital'];
+  const publicBuildings = ['civic','public','government','fire_station'];
+  const largeServiceBuildings = ['commercial','industrial','retail','office','warehouse','supermarket','sports_centre','stadium','train_station','transportation','hotel','church','religious','mosque','temple','synagogue','chapel'];
+
   if(p.craft){
     const v = lower(p.craft);
     if(v.includes('car_repair') || v.includes('mechanic')) return { macro: 'Artigiani e laboratori', sub: 'Officina / autoriparazione' };
@@ -402,22 +425,37 @@ function categorizeFeature(p){
   }
   if(p.office) return { macro: 'Uffici e PMI', sub: p.office };
   if(p.tourism) return { macro: 'Ospitalita e turismo', sub: p.tourism };
+  if(p.healthcare) return { macro: 'Sanita e assistenza', sub: p.healthcare };
   if(p.amenity){
     const v = lower(p.amenity);
     if(['restaurant','bar','cafe'].includes(v)) return { macro: 'Ristorazione', sub: p.amenity };
-    if(['school','clinic','hospital','doctors','dentist','pharmacy','post_office','townhall','library','community_centre'].includes(v)) return { macro: 'Servizi pubblici o collettivi', sub: p.amenity };
-    if(['bank','fuel','marketplace'].includes(v)) return { macro: 'Servizi e commercio', sub: p.amenity };
+    if(educationAmenities.includes(v)) return { macro: 'Istruzione e formazione', sub: p.amenity };
+    if(healthAmenities.includes(v)) return { macro: 'Sanita e assistenza', sub: p.amenity };
+    if(publicAmenities.includes(v) || cultureAmenities.includes(v)) return { macro: 'Spazi pubblici e collettivi', sub: p.amenity };
+    if(serviceAmenities.includes(v)) return { macro: 'Servizi e commercio', sub: p.amenity };
     return { macro: 'Servizi e commercio', sub: p.amenity };
   }
-  if(p.landuse === 'industrial') return { macro: 'Aree produttive', sub: 'landuse=industrial' };
-  if(['commercial','industrial','retail','office','warehouse','supermarket','school','hospital'].includes(lower(p.building))){
+  if(p.leisure) return { macro: 'Sport e tempo libero', sub: p.leisure };
+  if(p.public_transport === 'station' || p.railway === 'station') return { macro: 'Trasporti e servizi', sub: p.public_transport || p.railway };
+  if(p.man_made === 'works') return { macro: 'Aree commerciali e produttive', sub: 'man_made=works' };
+  if(['industrial','commercial','retail'].includes(lower(p.landuse))) return { macro: 'Aree commerciali e produttive', sub: 'landuse=' + p.landuse };
+  if(educationBuildings.includes(lower(p.building))){
+    return { macro: 'Istruzione e formazione', sub: p.building };
+  }
+  if(healthBuildings.includes(lower(p.building))){
+    return { macro: 'Sanita e assistenza', sub: p.building };
+  }
+  if(publicBuildings.includes(lower(p.building))){
+    return { macro: 'Spazi pubblici e collettivi', sub: p.building };
+  }
+  if(largeServiceBuildings.includes(lower(p.building))){
     return { macro: 'Edificio potenzialmente non domestico', sub: p.building };
   }
   return { macro: '', sub: '' };
 }
 
 document.addEventListener('DOMContentLoaded', async () => {
-  await loadLargeEnterpriseRules();
+  await loadExcludedEntityRules();
   loadCabins();
   document.getElementById('exportCsvBtn')?.addEventListener('click', exportCSV);
   document.getElementById('exportPdfBtn')?.addEventListener('click', exportPDF);

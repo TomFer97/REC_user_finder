@@ -1,8 +1,10 @@
 (function(root, factory){
+  const api = factory();
   if(typeof module === 'object' && module.exports){
-    module.exports = factory();
+    module.exports = api;
   }else{
-    root.LargeEnterpriseFilter = factory();
+    root.EntityExclusionFilter = api;
+    root.LargeEnterpriseFilter = api;
   }
 })(typeof self !== 'undefined' ? self : this, function(){
   const DEFAULT_FIELDS = [
@@ -12,7 +14,8 @@
     'name',
     'official_name',
     'short_name',
-    'alt_name'
+    'alt_name',
+    'owner'
   ];
 
   const EMPLOYEE_FIELDS = [
@@ -92,6 +95,7 @@
       return {
         label: 'Grande impresa dichiarata',
         reason: 'declared_size',
+        category: 'Grande impresa',
         employees,
         turnover,
         employeeThreshold,
@@ -108,6 +112,12 @@
     return [];
   }
 
+  function matchingFields(config, options){
+    if(options && Array.isArray(options.fields)) return options.fields;
+    if(config && Array.isArray(config.matchingFields)) return config.matchingFields;
+    return DEFAULT_FIELDS;
+  }
+
   function matchTerm(normalizedValue, term){
     const normalizedTerm = normalizeText(term);
     if(!normalizedValue || !normalizedTerm) return false;
@@ -120,13 +130,14 @@
     return Boolean(normalizedValue && normalizedTerm && normalizedValue === normalizedTerm);
   }
 
-  function findBrandRule(properties, rules, options = {}){
-    const fields = options.fields || DEFAULT_FIELDS;
-    const normalizedRules = normalizeRules(rules);
+  function findBrandRule(properties, config, options = {}){
+    const defaultFields = matchingFields(config, options);
+    const normalizedRules = normalizeRules(config);
 
     for(const rule of normalizedRules){
       const terms = Array.isArray(rule.terms) ? rule.terms : [];
       const exactTerms = Array.isArray(rule.exactTerms) ? rule.exactTerms : [];
+      const fields = Array.isArray(rule.fields) ? rule.fields : defaultFields;
       for(const field of fields){
         const normalizedValue = normalizeText(properties[field]);
         if(!normalizedValue) continue;
@@ -135,7 +146,8 @@
         if(exactTerm){
           return {
             label: rule.label || exactTerm,
-            reason: 'known_large_enterprise',
+            reason: rule.reason || 'excluded_entity',
+            category: rule.category || 'Ente escluso',
             field,
             term: exactTerm
           };
@@ -145,7 +157,8 @@
         if(term){
           return {
             label: rule.label || term,
-            reason: 'known_large_enterprise',
+            reason: rule.reason || 'excluded_entity',
+            category: rule.category || 'Ente escluso',
             field,
             term
           };
@@ -156,8 +169,8 @@
     return null;
   }
 
-  function findRule(properties = {}, rules = [], options = {}){
-    return findDeclaredLargeEnterprise(properties, options) || findBrandRule(properties, rules, options);
+  function findRule(properties = {}, config = [], options = {}){
+    return findDeclaredLargeEnterprise(properties, options) || findBrandRule(properties, config, options);
   }
 
   return {
