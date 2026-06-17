@@ -2,6 +2,16 @@ const express = require('express');
 const cors = require('cors');
 const fetch = require('node-fetch');
 const path = require('path');
+const fs = require('fs');
+const {
+  DEFAULT_MATCH_RADIUS_M,
+  featurePoint,
+  mergeEnrichment,
+  shouldAttemptRemoteEnrichment,
+  candidateFromOvertureFeature,
+  candidateFromDirectoryRecord,
+  matchLocalRecords
+} = require('./enrichment');
 
 const app = express();
 const port = process.env.PORT || 3000;
@@ -28,6 +38,16 @@ const gseFeatureLayerUrls = (
   .filter(Boolean);
 
 const defaultGseArcgisLayer = String(process.env.GSE_ARCGIS_LAYER || '21');
+const enrichmentEnabled = String(process.env.ENABLE_CONTACT_ENRICHMENT || 'true').toLowerCase() !== 'false';
+const wikidataEnrichmentEnabled = String(process.env.ENABLE_WIKIDATA_ENRICHMENT || 'true').toLowerCase() !== 'false';
+const enrichmentRadiusMeters = Number(process.env.ENRICHMENT_RADIUS_M || DEFAULT_MATCH_RADIUS_M);
+const wikidataEnrichmentLimit = Number(process.env.WIKIDATA_ENRICH_LIMIT || 25);
+const wikidataTimeoutMs = Number(process.env.WIKIDATA_TIMEOUT_MS || 8000);
+const wikidataEndpoint = process.env.WIKIDATA_ENDPOINT || 'https://query.wikidata.org/sparql';
+const overturePlacesFile = process.env.OVERTURE_PLACES_FILE ||
+  path.join(__dirname, 'webapp', 'data', 'enrichment', 'overture-places.geojson');
+const indicePaEntitiesFile = process.env.INDICEPA_ENTITIES_FILE ||
+  path.join(__dirname, 'webapp', 'data', 'enrichment', 'indicepa-entities.json');
 
 app.use(cors());
 app.use(express.json({ limit: '4mb' }));
@@ -48,6 +68,7 @@ const allowedParams = new Set([
 ]);
 
 const cache = {};
+const localDataCache = {};
 
 function cacheGet(key) {
   const entry = cache[key];
@@ -61,6 +82,99 @@ function cacheGet(key) {
 
 function cacheSet(key, value, ttlMs) {
   cache[key] = { value, expiry: Date.now() + ttlMs };
+}
+
+function readJsonFileIfExists(filePath) {
+  if (!filePath || !fs.existsSync(filePath)) return null;
+  const stat = fs.statSync(filePath);
+  const cached = localDataCache[filePath];
+  if (cached && cached.mtimeMs === stat.mtimeMs) return cached.value;
+  const value = JSON.parse(fs.readFileSync(filePath, 'utf8'));
+  localDataCache[filePath] = { mtimeMs: stat.mtimeMs, value };
+  return value;
+}
+
+function featuresFromLocalData(data) {
+  if (!data) return [];
+  if (Array.isArray(data)) return data;
+  if (Array.isArray(data.features)) return data.features;
+  if (Array.isArray(data.records)) return data.records;
+  if (Array.isArray(data.items)) return data.items;
+  return [];
+}
+
+function loadOverturePlaces() {
+  return featuresFromLocalData(readJsonFileIfExists(overturePlacesFile));
+}
+
+function loadIndicePaEntities() {
+  return featuresFromLocalData(readJsonFileIfExists(indicePaEntitiesFile));
+}
+
+function wikidataQueryForPoint(point, radiusMeters) {
+  const radiusKm = Math.max(0.02, radiusMeters / 1000);
+  return `
+SELECT ?item ?itemLabel ?distance ?website ?email ?phone WHERE {
+  SERVICE wikibase:around {
+    ?item wdt:P625 ?location .
+    bd:serviceParam wikibase:center "Point(${point[0]} ${point[1]})"^^geo:wktLiteral .
+    bd:serviceParam wikibase:radius "${radiusKm}" .
+    bd:serviceParam wikibase:distance ?distance .
+  }
+  OPTIONAL { ?item wdt:P856 ?website. }
+  OPTIONAL { ?item wdt:P968 ?email. }
+  OPTIONAL { ?item wdt:P1329 ?phone. }
+  SERVICE wikibase:label { bd:serviceParam wikibase:language "it,en". }
+}
+LIMIT 12
+`;
+}
+
+async function fetchWikidataCandidates(feature) {
+  const point = featurePoint(feature);
+  if (!point) return [];
+
+  const roundedKey = point.map(value => Number(value).toFixed(4)).join(',');
+  const cacheKey = `wikidata:${roundedKey}:${enrichmentRadiusMeters}`;
+  const cached = cacheGet(cacheKey);
+  if (cached) return cached;
+
+  const params = new URLSearchParams({
+    query: wikidataQueryForPoint(point, enrichmentRadiusMeters),
+    format: 'json'
+  });
+
+  const response = await fetch(`${wikidataEndpoint}?${params.toString()}`, {
+    headers: {
+      Accept: 'application/sparql-results+json',
+      'User-Agent': 'REC_user_finding/0.1 (+https://github.com/TomFer97/REC_user_finding)'
+    },
+    timeout: wikidataTimeoutMs
+  });
+
+  if (!response.ok) {
+    const text = await response.text();
+    throw new Error(`Wikidata ${response.status}: ${text.replace(/\s+/g, ' ').slice(0, 180)}`);
+  }
+
+  const json = await response.json();
+  const candidates = ((json.results && json.results.bindings) || []).map(row => {
+    const distanceKm = Number(row.distance && row.distance.value);
+    return {
+      provider: 'wikidata',
+      label: 'Wikidata',
+      name: row.itemLabel && row.itemLabel.value,
+      website: row.website && row.website.value,
+      email: row.email && row.email.value,
+      phone: row.phone && row.phone.value,
+      distance_m: Number.isFinite(distanceKm) ? distanceKm * 1000 : null,
+      raw_id: row.item && row.item.value,
+      confidence: 0.65
+    };
+  });
+
+  cacheSet(cacheKey, candidates, 24 * 60 * 60 * 1000);
+  return candidates;
 }
 
 function normalizeGseLayerUrl(url, serviceLayer = defaultGseArcgisLayer) {
@@ -488,6 +602,93 @@ function estimateConfidence(tags) {
   return 'bassa';
 }
 
+async function enrichFeaturesWithContactData(features) {
+  const meta = {
+    enabled: enrichmentEnabled,
+    radiusMeters: enrichmentRadiusMeters,
+    overturePlacesLoaded: 0,
+    indicePaRecordsLoaded: 0,
+    wikidataEnabled: wikidataEnrichmentEnabled,
+    wikidataRequests: 0,
+    wikidataSkippedByLimit: 0,
+    enrichedFeatures: 0,
+    errors: []
+  };
+
+  if (!enrichmentEnabled) {
+    return {
+      features: features.map(feature => mergeEnrichment(feature, [], { radiusMeters: enrichmentRadiusMeters })),
+      meta
+    };
+  }
+
+  let overturePlaces = [];
+  let indicePaEntities = [];
+
+  try {
+    overturePlaces = loadOverturePlaces();
+    meta.overturePlacesLoaded = overturePlaces.length;
+  } catch (err) {
+    meta.errors.push(`Overture locale: ${err.message}`);
+  }
+
+  try {
+    indicePaEntities = loadIndicePaEntities();
+    meta.indicePaRecordsLoaded = indicePaEntities.length;
+  } catch (err) {
+    meta.errors.push(`IndicePA locale: ${err.message}`);
+  }
+
+  let wikidataRequests = 0;
+
+  const enriched = [];
+  for (const feature of features) {
+    const candidates = [];
+
+    if (overturePlaces.length) {
+      candidates.push(...matchLocalRecords(feature, overturePlaces, {
+        radiusMeters: enrichmentRadiusMeters,
+        mapper: candidateFromOvertureFeature
+      }));
+    }
+
+    if (indicePaEntities.length) {
+      candidates.push(...matchLocalRecords(feature, indicePaEntities, {
+        radiusMeters: enrichmentRadiusMeters,
+        mapper: (record, targetFeature) => candidateFromDirectoryRecord(record, targetFeature, 'indicepa', 'IndicePA locale')
+      }));
+    }
+
+    if (
+      wikidataEnrichmentEnabled &&
+      wikidataRequests < wikidataEnrichmentLimit &&
+      shouldAttemptRemoteEnrichment(feature)
+    ) {
+      wikidataRequests += 1;
+      try {
+        candidates.push(...await fetchWikidataCandidates(feature));
+      } catch (err) {
+        if (meta.errors.length < 5) meta.errors.push(`Wikidata: ${err.message}`);
+      }
+    } else if (
+      wikidataEnrichmentEnabled &&
+      wikidataRequests >= wikidataEnrichmentLimit &&
+      shouldAttemptRemoteEnrichment(feature)
+    ) {
+      meta.wikidataSkippedByLimit += 1;
+    }
+
+    const merged = mergeEnrichment(feature, candidates, { radiusMeters: enrichmentRadiusMeters });
+    if (merged.properties && merged.properties.enrichment_source) {
+      meta.enrichedFeatures += 1;
+    }
+    enriched.push(merged);
+  }
+
+  meta.wikidataRequests = wikidataRequests;
+  return { features: enriched, meta };
+}
+
 async function runOverpassSearch(geometry) {
   const rings = getPolygonRings(geometry);
   if (!rings.length) throw new Error('GeoJSON polygon or multipolygon required');
@@ -543,17 +744,19 @@ async function runOverpassSearch(geometry) {
   const uniqueFeatures = uniqueElements
     .map(el => overpassElementToFeature(el, buildingMatchFromElement(el, buildingCandidates)))
     .filter(Boolean);
+  const enriched = await enrichFeaturesWithContactData(uniqueFeatures);
 
   return {
     type: 'FeatureCollection',
-    features: uniqueFeatures,
+    features: enriched.features,
     meta: {
       source: 'overpass',
-      count: uniqueFeatures.length,
+      count: enriched.features.length,
       buildingCandidates: buildingCandidates.length,
       queryModes: Array.from(new Set(queryModes)),
       overpassEndpointsTried: overpassUrls,
       overpassEndpointsUsed: Array.from(new Set(usedEndpoints)),
+      enrichment: enriched.meta,
       generatedAt: new Date().toISOString()
     }
   };
@@ -564,7 +767,8 @@ function mockOsmToGeoJson() {
   const features = (mockData.elements || [])
     .filter(isTargetElement)
     .map(el => overpassElementToFeature(el, buildingMatchFromElement(el, [])))
-    .filter(Boolean);
+    .filter(Boolean)
+    .map(feature => mergeEnrichment(feature, [], { radiusMeters: enrichmentRadiusMeters }));
 
   return {
     type: 'FeatureCollection',

@@ -50,6 +50,7 @@ Di default l'app prova a usare Overpass reale.
 - `/api/gse-area`: proxy backend per le geometrie ufficiali GSE.
 - `/api/osm-search`: ricerca Overpass su target non domestici, spazi pubblici/collettivi e geometrie edificio.
 - `webapp/data/excluded-entities.json`: lista configurabile di enti, insegne o operatori da scartare.
+- `webapp/data/enrichment/`: dataset locali opzionali per arricchire nome, telefono, email e sito.
 - `webapp/data/cabins.json` e `webapp/data/areas.json`: dati legacy non usati dalla UI principale.
 - `webapp/data/osm-mock.json`: dati demo usati solo con `USE_MOCK_OSM=true`.
 
@@ -73,6 +74,29 @@ Il filtro serve a rendere piu pulita la mappa e l'export, ma la qualificazione f
 ## Target cercati
 
 La ricerca Overpass include negozi, artigiani, uffici, turismo, ristorazione, aree produttive/commerciali, scuole, universita, sanita, servizi pubblici, biblioteche, centri civici, impianti sportivi, trasporti e altri edifici non domestici. I tetti grandi aumentano la priorita del target e vengono mantenuti anche quando il nome OSM e' incompleto.
+
+## Arricchimento contatti
+
+Il backend prova ad arricchire ogni target con nome e contatti migliori:
+
+- tag OSM (`name`, `operator`, `brand`, `contact:*`, `website`);
+- Overture Places da file locale opzionale;
+- IndicePA/enti pubblici da file locale opzionale;
+- Wikidata via SPARQL per target pubblici, grandi tetti o record con nome generico.
+
+Variabili utili:
+
+```bash
+ENABLE_CONTACT_ENRICHMENT=false   # disabilita tutto l'arricchimento
+ENABLE_WIKIDATA_ENRICHMENT=false  # usa solo OSM e file locali
+WIKIDATA_ENRICH_LIMIT=25          # limite richieste Wikidata per ricerca
+WIKIDATA_TIMEOUT_MS=8000          # timeout singola richiesta Wikidata
+ENRICHMENT_RADIUS_M=120           # raggio match locale/remoto
+OVERTURE_PLACES_FILE=...          # GeoJSON Overture locale
+INDICEPA_ENTITIES_FILE=...        # JSON enti pubblici locale
+```
+
+L'export include sia il nome usato per outreach sia i campi arricchiti e la relativa fonte.
 
 ## Export
 
