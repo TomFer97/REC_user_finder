@@ -177,6 +177,8 @@ function enrichFeatures(features, code){
       const address = formatAddress(p);
       const priority = calculateOutreachPriority(Object.assign({}, p, { address }), cat);
       const buildingArea = getBuildingArea(p);
+      const osmDisplayName = p.osm_display_name || p.name || p.operator || p.brand || p.shop || p.craft || p.office || p.amenity || p.leisure || p.tourism || p.healthcare || p.building || p.landuse || 'Da verificare';
+      const enrichedName = firstValue(p.enriched_name, osmDisplayName);
       return Object.assign({}, f, {
         properties: Object.assign(p, {
           cabina_cod_ac: code,
@@ -185,7 +187,8 @@ function enrichFeatures(features, code){
           lat: coords.lat,
           lon: coords.lon,
           address,
-          outreach_name: p.name || p.operator || p.brand || p.shop || p.craft || p.office || p.amenity || p.leisure || p.tourism || p.healthcare || p.building || p.landuse || 'Da verificare',
+          osm_name_original: osmDisplayName,
+          outreach_name: enrichedName,
           priorita_outreach: priority,
           building_area_m2: buildingArea || '',
           building_area_label: formatBuildingArea(buildingArea),
@@ -272,9 +275,10 @@ function calculateOutreachPriority(p, cat){
   if(area >= 3000) score += 3;
   else if(area >= 1500) score += 2;
   else if(area >= MIN_LARGE_ROOF_CANDIDATE_M2) score += 1;
-  if(p.name || p.operator || p.brand) score += 1;
+  if(p.enriched_name || p.name || p.operator || p.brand) score += 1;
   if(p['addr:street'] || p.address) score += 1;
-  if(p.phone || p['contact:phone'] || p.email || p.website || p.url) score += 1;
+  if(p.enriched_phone || p.enriched_email || p.enriched_website || p.phone || p['contact:phone'] || p.email || p.website || p.url) score += 1;
+  if(p.enrichment_source && p.enrichment_source !== 'OpenStreetMap') score += 1;
   if(confidence === 'alta') score += 2;
   else if(confidence === 'media') score += 1;
   if(score >= 6) return 'alta';
@@ -288,7 +292,8 @@ function renderResults(features, meta, filterMeta = {}){
     pointToLayer: (f, latlng) => L.circleMarker(latlng, markerStyleForFeature(f)),
     onEachFeature: (f, layer) => {
       const p = f.properties || {};
-      layer.bindPopup('<strong>' + esc(p.outreach_name) + '</strong><br>' + esc(p.category_macro) + (p.category_sub ? ' / ' + esc(p.category_sub) : '') + '<br>' + esc(p.address || '') + '<br>Superficie: ' + esc(formatBuildingArea(p.building_area_m2)) + '<br>Priorita: ' + esc(p.priorita_outreach || '') + '<br>Confidenza: ' + esc(p.confidence || ''));
+      const contactLine = firstValue(p.enriched_phone, p.phone, p['contact:phone'], p.enriched_email, p.email, p['contact:email'], p.enriched_website, p.website, p.url);
+      layer.bindPopup('<strong>' + esc(p.outreach_name) + '</strong><br>' + esc(p.category_macro) + (p.category_sub ? ' / ' + esc(p.category_sub) : '') + '<br>' + esc(p.address || '') + '<br>Superficie: ' + esc(formatBuildingArea(p.building_area_m2)) + '<br>Priorita: ' + esc(p.priorita_outreach || '') + '<br>Fonte arricchimento: ' + esc(p.enrichment_source || 'n.d.') + (contactLine ? '<br>Contatto: ' + esc(contactLine) : '') + '<br>Confidenza: ' + esc(p.confidence || ''));
     }
   }).addTo(map);
   try{ if(features.length) map.fitBounds(resultsLayer.getBounds().pad(0.2)); }catch(e){}
@@ -308,7 +313,7 @@ function populateLongList(features){
     const p = f.properties || {};
     const el = document.createElement('div');
     el.className = 'result-item';
-    el.innerHTML = '<strong>' + esc(p.outreach_name) + '</strong><br><small>Priorita: ' + esc(p.priorita_outreach || 'n.d.') + '<br>Superficie: ' + esc(formatBuildingArea(p.building_area_m2)) + '<br>' + esc(p.category_macro) + (p.category_sub ? ' / ' + esc(p.category_sub) : '') + '<br>' + esc(p.address || 'Indirizzo non disponibile') + '<br>Confidenza: ' + esc(p.confidence || 'n.d.') + '</small>';
+    el.innerHTML = '<strong>' + esc(p.outreach_name) + '</strong><br><small>Priorita: ' + esc(p.priorita_outreach || 'n.d.') + '<br>Superficie: ' + esc(formatBuildingArea(p.building_area_m2)) + '<br>' + esc(p.category_macro) + (p.category_sub ? ' / ' + esc(p.category_sub) : '') + '<br>' + esc(p.address || 'Indirizzo non disponibile') + '<br>Fonte arricchimento: ' + esc(p.enrichment_source || 'n.d.') + '<br>Confidenza: ' + esc(p.confidence || 'n.d.') + '</small>';
     div.appendChild(el);
   });
 }
@@ -325,19 +330,29 @@ function osmReference(p){
 function exportRows(){
   return osmResults.map(feature => {
     const p = feature.properties || {};
+    const phone = firstValue(p.enriched_phone, p.phone, p['contact:phone']);
+    const email = firstValue(p.enriched_email, p.email, p['contact:email']);
+    const website = firstValue(p.enriched_website, p.website, p.url, p['contact:website']);
     return {
       Nome: p.outreach_name || '',
+      Nome_OSM: p.osm_name_original || '',
+      Nome_arricchito: p.enriched_name || '',
+      Fonte_arricchimento: p.enrichment_source || '',
+      Confidenza_arricchimento: p.enrichment_confidence || '',
       Priorita: p.priorita_outreach || '',
       Superficie_mq: p.building_area_m2 || '',
       Categoria: [p.category_macro, p.category_sub].filter(Boolean).join(' / '),
       Indirizzo: p.address || '',
-      Telefono: firstValue(p.phone, p['contact:phone']),
-      Email: firstValue(p.email, p['contact:email']),
-      Sito: firstValue(p.website, p.url, p['contact:website']),
+      Telefono: phone,
+      Telefono_arricchito: p.enriched_phone || '',
+      Email: email,
+      Email_arricchita: p.enriched_email || '',
+      Sito: website,
+      Sito_arricchito: p.enriched_website || '',
       Latitudine: p.lat || '',
       Longitudine: p.lon || '',
       Confidenza: p.confidence || '',
-      Note: p.note_verifica || '',
+      Note: [p.note_verifica, p.enrichment_note].filter(Boolean).join(' '),
       OSM: osmReference(p)
     };
   });
@@ -376,11 +391,12 @@ async function exportPDF(){
     row.Categoria,
     row.Indirizzo,
     row.Telefono,
-    row.Sito
+    row.Email || row.Sito,
+    row.Fonte_arricchimento
   ]);
   doc.text('Potenziali utenze non domestiche - Vaprio d Adda', 40, 40);
   doc.autoTable({
-    head: [['Nome','Priorita','Superficie','Categoria','Indirizzo','Telefono','Sito']],
+    head: [['Nome','Priorita','Superficie','Categoria','Indirizzo','Telefono','Email/Sito','Fonte']],
     body,
     startY: 60,
     styles: { fontSize: 8, cellPadding: 3, overflow: 'linebreak' },
@@ -389,7 +405,8 @@ async function exportPDF(){
       0: { cellWidth: 120 },
       3: { cellWidth: 130 },
       4: { cellWidth: 160 },
-      6: { cellWidth: 120 }
+      6: { cellWidth: 120 },
+      7: { cellWidth: 90 }
     }
   });
   doc.save('vaprio_potenziali_utenti_' + (selectedCabinCode || 'export') + '.pdf');
