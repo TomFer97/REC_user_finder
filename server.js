@@ -128,11 +128,38 @@ const nonResidentialLanduseValues = [
   'industrial', 'commercial', 'retail'
 ];
 
+const coreAmenityValues = [
+  'school', 'clinic', 'hospital', 'doctors', 'dentist', 'pharmacy',
+  'post_office', 'townhall', 'library', 'community_centre', 'restaurant',
+  'bar', 'cafe', 'fuel', 'bank', 'marketplace'
+];
+
+const coreBuildingValues = [
+  'commercial', 'industrial', 'retail', 'office', 'warehouse', 'supermarket',
+  'school', 'hospital'
+];
+
+const coreLanduseValues = [
+  'industrial'
+];
+
 function overpassRegex(values) {
   return values.join('|');
 }
 
-function buildNonResidentialQuery(poly) {
+function buildNonResidentialQuery(poly, options = {}) {
+  const mode = options.mode || 'expanded';
+  const expanded = mode !== 'core';
+  const amenityValues = expanded ? nonResidentialAmenityValues : coreAmenityValues;
+  const buildingValues = expanded ? nonResidentialBuildingValues : coreBuildingValues;
+  const landuseValues = expanded ? nonResidentialLanduseValues : coreLanduseValues;
+  const expandedSelectors = expanded ? `
+  nwr["healthcare"](poly:"${poly}");
+  nwr["leisure"~"${overpassRegex(nonResidentialLeisureValues)}"](poly:"${poly}");
+  nwr["public_transport"="station"](poly:"${poly}");
+  nwr["railway"="station"](poly:"${poly}");
+  nwr["man_made"="works"](poly:"${poly}");` : '';
+
   return `
 [out:json][timeout:45];
 (
@@ -140,14 +167,9 @@ function buildNonResidentialQuery(poly) {
   nwr["craft"](poly:"${poly}");
   nwr["office"](poly:"${poly}");
   nwr["tourism"](poly:"${poly}");
-  nwr["healthcare"](poly:"${poly}");
-  nwr["amenity"~"${overpassRegex(nonResidentialAmenityValues)}"](poly:"${poly}");
-  nwr["leisure"~"${overpassRegex(nonResidentialLeisureValues)}"](poly:"${poly}");
-  nwr["public_transport"="station"](poly:"${poly}");
-  nwr["railway"="station"](poly:"${poly}");
-  nwr["man_made"="works"](poly:"${poly}");
-  nwr["building"~"${overpassRegex(nonResidentialBuildingValues)}"](poly:"${poly}");
-  nwr["landuse"~"${overpassRegex(nonResidentialLanduseValues)}"](poly:"${poly}");
+  nwr["amenity"~"${overpassRegex(amenityValues)}"](poly:"${poly}");${expandedSelectors}
+  nwr["building"~"${overpassRegex(buildingValues)}"](poly:"${poly}");
+  nwr["landuse"~"${overpassRegex(landuseValues)}"](poly:"${poly}");
 )->.targets;
 (
   way["building"](poly:"${poly}");
@@ -161,7 +183,11 @@ out center tags geom;
 `;
 }
 
-async function fetchOverpassWithFallback(query) {
+function shouldTryNextOverpassEndpoint(status) {
+  return status === 406 || status === 408 || status === 409 || status === 429 || status >= 500;
+}
+
+async function fetchOverpassWithFallback(query, label = 'query') {
   const errors = [];
 
   for (const url of overpassUrls) {
@@ -169,14 +195,20 @@ async function fetchOverpassWithFallback(query) {
       const response = await fetch(url, {
         method: 'POST',
         headers: {
-          'Content-Type': 'application/x-www-form-urlencoded',
-          Accept: 'application/json'
+          'Content-Type': 'application/x-www-form-urlencoded;charset=UTF-8',
+          Accept: '*/*',
+          'User-Agent': 'REC_user_finding/0.1 (+https://github.com/TomFer97/REC_user_finding)'
         },
         body: new URLSearchParams({ data: query })
       });
 
       if (response.ok) {
-        return { data: await response.json(), url };
+        try {
+          return { data: await response.json(), url };
+        } catch (err) {
+          errors.push(`${label} ${url} -> JSON non valido: ${err.message}`);
+          continue;
+        }
       }
 
       const text = await response.text();
@@ -185,13 +217,13 @@ async function fetchOverpassWithFallback(query) {
         .replace(/\s+/g, ' ')
         .slice(0, 220);
 
-      errors.push(`${url} -> ${response.status}: ${clean}`);
+      errors.push(`${label} ${url} -> ${response.status}: ${clean}`);
 
-      if (response.status !== 429 && response.status < 500) {
+      if (!shouldTryNextOverpassEndpoint(response.status)) {
         break;
       }
     } catch (err) {
-      errors.push(`${url} -> ${err.message}`);
+      errors.push(`${label} ${url} -> ${err.message}`);
     }
   }
 
@@ -463,14 +495,30 @@ async function runOverpassSearch(geometry) {
   const targetElements = [];
   const buildingCandidates = [];
   const usedEndpoints = [];
+  const queryModes = [];
 
   for (const ring of rings) {
     const poly = ringToOverpassPoly(ring);
     if (!poly) continue;
 
-    const query = buildNonResidentialQuery(poly);
-    const result = await fetchOverpassWithFallback(query);
+    let queryMode = 'expanded';
+    let result;
+
+    try {
+      const query = buildNonResidentialQuery(poly, { mode: 'expanded' });
+      result = await fetchOverpassWithFallback(query, 'expanded');
+    } catch (expandedErr) {
+      queryMode = 'core_fallback';
+      try {
+        const fallbackQuery = buildNonResidentialQuery(poly, { mode: 'core' });
+        result = await fetchOverpassWithFallback(fallbackQuery, 'core fallback');
+      } catch (fallbackErr) {
+        throw new Error(expandedErr.message + ' | Fallback core: ' + fallbackErr.message);
+      }
+    }
+
     usedEndpoints.push(result.url);
+    queryModes.push(queryMode);
 
     (result.data.elements || []).forEach(el => {
       if (isBuildingCandidate(el)) {
@@ -503,6 +551,7 @@ async function runOverpassSearch(geometry) {
       source: 'overpass',
       count: uniqueFeatures.length,
       buildingCandidates: buildingCandidates.length,
+      queryModes: Array.from(new Set(queryModes)),
       overpassEndpointsTried: overpassUrls,
       overpassEndpointsUsed: Array.from(new Set(usedEndpoints)),
       generatedAt: new Date().toISOString()
