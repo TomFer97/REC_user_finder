@@ -41,6 +41,15 @@ npm test
 
 Il test controlla la sintassi del backend e del JavaScript frontend principale.
 
+## Controlli automatici
+
+La repository usa GitHub Actions e Dependabot per tenere il codice sotto controllo:
+
+- `Node.js CI`: esegue `npm ci`, build se presente e `npm test` su push e pull request verso `main`;
+- `CodeQL`: analisi statica JavaScript per bug e problemi di sicurezza su push, pull request e ogni martedi mattina;
+- `Weekly Quality Check`: esegue test e `npm audit` ogni lunedi mattina;
+- `Dependabot`: apre pull request settimanali per aggiornamenti npm e GitHub Actions.
+
 ## Modalita mock
 
 Per evitare chiamate a Overpass durante demo o sviluppo:
