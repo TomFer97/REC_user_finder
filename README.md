@@ -27,6 +27,12 @@ Aprire:
 http://localhost:3000
 ```
 
+Se la porta `3000` e' gia occupata, il server prova automaticamente la porta successiva e stampa l'URL corretto nel terminale. In alternativa puoi forzare una porta:
+
+```powershell
+$env:PORT=3001; npm start
+```
+
 ## Test rapido
 
 ```bash

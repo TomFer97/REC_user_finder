@@ -1000,6 +1000,23 @@ app.get('*', (req, res) => {
   res.sendFile(path.join(__dirname, 'webapp', 'index.html'));
 });
 
-app.listen(port, () => {
-  console.log(`Server listening on http://localhost:${port}`);
-});
+function startServer(preferredPort, attempts = 0) {
+  const numericPort = Number(preferredPort);
+  const server = app.listen(numericPort, () => {
+    console.log(`Server listening on http://localhost:${numericPort}`);
+  });
+
+  server.on('error', error => {
+    if (error.code === 'EADDRINUSE' && attempts < 20) {
+      const nextPort = numericPort + 1;
+      console.warn(`Porta ${numericPort} gia in uso, provo http://localhost:${nextPort}...`);
+      startServer(nextPort, attempts + 1);
+      return;
+    }
+
+    console.error(`Impossibile avviare il server sulla porta ${numericPort}: ${error.message}`);
+    process.exit(1);
+  });
+}
+
+startServer(port);

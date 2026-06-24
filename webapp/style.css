@@ -12,8 +12,19 @@ h2{font-size:15px;margin:0 0 8px;color:var(--text)}
 #cabinsList li:hover{background:#eaf2ff;border-color:#c7dcff}
 #cabinsList li.active{background:#cfe4ff;font-weight:600;color:#0b4da2}
 .controls-row{display:flex;gap:6px;align-items:center;margin-bottom:8px}
+.search-row{display:grid;grid-template-columns:1fr auto;gap:6px;align-items:center}
+#targetSearchInput{min-width:0;border:1px solid #d0d5dd;padding:7px;border-radius:5px;font-size:13px}
+#targetSearchInput:focus{outline:2px solid #b9d6ff;border-color:var(--ceah-blue)}
+#searchSuggestions{margin-top:8px;font-size:12px}
+.search-suggestion{width:100%;text-align:left;border:1px solid #edf0f5;border-radius:5px;padding:7px;margin-bottom:5px;background:#fff;color:var(--text)}
+.search-suggestion:hover{background:#f3f7ff;color:var(--text)}
+.search-suggestion strong{display:block;font-size:12px;color:var(--text);line-height:1.25}
+.search-suggestion small{display:block;color:#667085;line-height:1.25;margin-top:2px}
+.search-empty{color:#667085;line-height:1.35}
 #resultsList{max-height:260px;overflow:auto;font-size:13px}
 .result-item{padding:8px 4px;border-bottom:1px solid #edf0f5}
+.result-item{cursor:pointer}
+.result-item.active{background:#eaf2ff;border-left:3px solid var(--ceah-blue);padding-left:6px}
 .result-item small{color:#475467;line-height:1.35}
 #info{margin-top:12px;color:#555;font-size:13px;line-height:1.35;background:#fff;border-left:4px solid var(--ceah-blue);padding:8px;border-radius:4px}
 #appFooter{position:fixed;left:0;right:0;bottom:0;height:40px;background:#fff;border-top:1px solid #eee;display:flex;align-items:center;gap:12px;padding:8px 12px;font-size:11px;color:#444;z-index:1001}
