@@ -1,11 +1,12 @@
 const map = L.map('map').setView([45.576, 9.525], 13);
 L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',{maxZoom:19,attribution:'© OpenStreetMap contributors'}).addTo(map);
 
-let selectedLayer, resultsLayer;
+let selectedLayer, resultsLayer, searchPinLayer;
 let osmResults = [];
 let selectedCabinCode = '';
 let excludedEntityConfig = { rules: [] };
 let excludedEntityResults = [];
+let featureLayerById = new Map();
 
 const MIN_LARGE_ROOF_CANDIDATE_M2 = 750;
 
@@ -135,9 +136,21 @@ function filterExcludedEntities(features){
   return { kept, excluded };
 }
 
+function clearSearchSelection(){
+  if(searchPinLayer){
+    searchPinLayer.remove();
+    searchPinLayer = null;
+  }
+  const input = document.getElementById('targetSearchInput');
+  if(input) input.value = '';
+  document.querySelectorAll('.result-item.active').forEach(el => el.classList.remove('active'));
+  renderSearchSuggestions([]);
+}
+
 async function selectOfficialGseArea(area, trigger){
   try{
     selectedCabinCode = area.code;
+    clearSearchSelection();
     document.querySelectorAll('#cabinsList li').forEach(n=>n.classList.remove('active'));
     if(trigger) trigger.classList.add('active');
     setInfo('Caricamento geometria ufficiale GSE (' + area.sourceRef + ')...');
@@ -170,7 +183,7 @@ async function selectOfficialGseArea(area, trigger){
 
 function enrichFeatures(features, code){
   return features
-    .map(f => {
+    .map((f, idx) => {
       const p = Object.assign({}, f.properties || {});
       const cat = categorizeFeature(p);
       const coords = getCoordinates(f);
@@ -181,6 +194,7 @@ function enrichFeatures(features, code){
       const enrichedName = firstValue(p.enriched_name, osmDisplayName);
       return Object.assign({}, f, {
         properties: Object.assign(p, {
+          search_id: f.id || (p._osm_type && p._osm_id ? p._osm_type + '/' + p._osm_id : code + '-' + idx),
           cabina_cod_ac: code,
           category_macro: cat.macro,
           category_sub: cat.sub,
@@ -288,16 +302,19 @@ function calculateOutreachPriority(p, cat){
 
 function renderResults(features, meta, filterMeta = {}){
   if(resultsLayer) resultsLayer.remove();
+  featureLayerById = new Map();
   resultsLayer = L.geoJSON(features, {
     pointToLayer: (f, latlng) => L.circleMarker(latlng, markerStyleForFeature(f)),
     onEachFeature: (f, layer) => {
       const p = f.properties || {};
+      featureLayerById.set(p.search_id, layer);
       const contactLine = firstValue(p.enriched_phone, p.phone, p['contact:phone'], p.enriched_email, p.email, p['contact:email'], p.enriched_website, p.website, p.url);
       layer.bindPopup('<strong>' + esc(p.outreach_name) + '</strong><br>' + esc(p.category_macro) + (p.category_sub ? ' / ' + esc(p.category_sub) : '') + '<br>' + esc(p.address || '') + '<br>Superficie: ' + esc(formatBuildingArea(p.building_area_m2)) + '<br>Priorita: ' + esc(p.priorita_outreach || '') + '<br>Fonte arricchimento: ' + esc(p.enrichment_source || 'n.d.') + (contactLine ? '<br>Contatto: ' + esc(contactLine) : '') + '<br>Confidenza: ' + esc(p.confidence || ''));
     }
   }).addTo(map);
   try{ if(features.length) map.fitBounds(resultsLayer.getBounds().pad(0.2)); }catch(e){}
   populateLongList(features);
+  renderSearchSuggestions([]);
   const source = meta.source === 'mock' ? 'mock' : 'OpenStreetMap/Overpass';
   const excluded = filterMeta.excludedEntities || 0;
   const filterText = excluded ? ' Esclusi ' + excluded + ' enti/insegne dalla lista scarti CER.' : '';
@@ -313,9 +330,153 @@ function populateLongList(features){
     const p = f.properties || {};
     const el = document.createElement('div');
     el.className = 'result-item';
+    el.dataset.searchId = p.search_id || '';
     el.innerHTML = '<strong>' + esc(p.outreach_name) + '</strong><br><small>Priorita: ' + esc(p.priorita_outreach || 'n.d.') + '<br>Superficie: ' + esc(formatBuildingArea(p.building_area_m2)) + '<br>' + esc(p.category_macro) + (p.category_sub ? ' / ' + esc(p.category_sub) : '') + '<br>' + esc(p.address || 'Indirizzo non disponibile') + '<br>Fonte arricchimento: ' + esc(p.enrichment_source || 'n.d.') + '<br>Confidenza: ' + esc(p.confidence || 'n.d.') + '</small>';
+    el.addEventListener('click', () => focusFeatureOnMap(f));
     div.appendChild(el);
   });
+}
+
+function normalizeSearchText(value){
+  return String(value ?? '')
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+function searchableText(feature){
+  const p = feature.properties || {};
+  return normalizeSearchText([
+    p.outreach_name,
+    p.osm_name_original,
+    p.enriched_name,
+    p.brand,
+    p.operator,
+    p.category_macro,
+    p.category_sub,
+    p.address,
+    p['addr:street'],
+    p['addr:housenumber'],
+    p['addr:city'],
+    p.enriched_website,
+    p.website,
+    p.url,
+    osmReference(p)
+  ].filter(Boolean).join(' '));
+}
+
+function scoreSearchMatch(feature, query){
+  const p = feature.properties || {};
+  const normalizedQuery = normalizeSearchText(query);
+  if(!normalizedQuery) return 0;
+  const text = searchableText(feature);
+  const tokens = normalizedQuery.split(' ').filter(Boolean);
+  if(!tokens.every(token => text.includes(token))) return 0;
+
+  let score = 1;
+  const name = normalizeSearchText(p.outreach_name);
+  const address = normalizeSearchText(p.address);
+  if(name === normalizedQuery) score += 10;
+  else if(name.startsWith(normalizedQuery)) score += 6;
+  else if(name.includes(normalizedQuery)) score += 4;
+  if(address.includes(normalizedQuery)) score += 3;
+  if(p.enriched_name) score += 1;
+  if(p.priorita_outreach === 'alta') score += 1;
+  score += Math.min(3, getBuildingArea(p) / 1500);
+  return score;
+}
+
+function findSearchMatches(query, limit = 6){
+  return osmResults
+    .map(feature => ({ feature, score: scoreSearchMatch(feature, query) }))
+    .filter(item => item.score > 0)
+    .sort((a, b) => b.score - a.score || String(a.feature.properties.outreach_name).localeCompare(String(b.feature.properties.outreach_name)))
+    .slice(0, limit)
+    .map(item => item.feature);
+}
+
+function renderSearchSuggestions(matches, message){
+  const container = document.getElementById('searchSuggestions');
+  if(!container) return;
+  container.innerHTML = '';
+  if(message){
+    const empty = document.createElement('div');
+    empty.className = 'search-empty';
+    empty.textContent = message;
+    container.appendChild(empty);
+    return;
+  }
+  matches.forEach(feature => {
+    const p = feature.properties || {};
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.className = 'search-suggestion';
+    btn.innerHTML = '<strong>' + esc(p.outreach_name || 'Target') + '</strong><small>' + esc([p.address, formatBuildingArea(p.building_area_m2), p.category_macro].filter(Boolean).join(' - ')) + '</small>';
+    btn.addEventListener('click', () => focusFeatureOnMap(feature));
+    container.appendChild(btn);
+  });
+}
+
+function runTargetSearch(){
+  const input = document.getElementById('targetSearchInput');
+  const query = input ? input.value.trim() : '';
+  if(!query){
+    renderSearchSuggestions([]);
+    return;
+  }
+  if(!osmResults.length){
+    renderSearchSuggestions([], 'Carica prima una delle aree GSE.');
+    return;
+  }
+  const matches = findSearchMatches(query);
+  if(!matches.length){
+    renderSearchSuggestions([], 'Nessun target trovato nei risultati caricati.');
+    return;
+  }
+  renderSearchSuggestions(matches);
+  focusFeatureOnMap(matches[0]);
+}
+
+function highlightResultItem(searchId){
+  document.querySelectorAll('.result-item.active').forEach(el => el.classList.remove('active'));
+  if(!searchId) return;
+  const items = Array.from(document.querySelectorAll('.result-item'));
+  const item = items.find(el => el.dataset.searchId === searchId);
+  if(item){
+    item.classList.add('active');
+    item.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+  }
+}
+
+function linkedBuildingLabel(p){
+  if(!p.building_osm_type || !p.building_osm_id) return '';
+  return p.building_osm_type + '/' + p.building_osm_id;
+}
+
+function focusFeatureOnMap(feature){
+  const p = feature.properties || {};
+  const coords = getCoordinates(feature);
+  if(!Number.isFinite(Number(coords.lat)) || !Number.isFinite(Number(coords.lon))) return;
+  const latlng = [Number(coords.lat), Number(coords.lon)];
+  if(searchPinLayer) searchPinLayer.remove();
+  searchPinLayer = L.circleMarker(latlng, {
+    radius: 8,
+    color: '#1d4ed8',
+    weight: 2,
+    opacity: 0.78,
+    fillColor: '#ffffff',
+    fillOpacity: 0.92,
+    interactive: false
+  }).addTo(map);
+  map.setView(latlng, Math.max(map.getZoom(), 17), { animate: true });
+  const layer = featureLayerById.get(p.search_id);
+  if(layer) layer.openPopup();
+  highlightResultItem(p.search_id);
+  const building = linkedBuildingLabel(p);
+  setInfo('Selezionato: ' + (p.outreach_name || 'target') + '. ' + (building ? 'Edificio collegato: ' + building + ', ' : '') + 'superficie ' + formatBuildingArea(p.building_area_m2) + '.');
 }
 
 function firstValue(...values){
@@ -476,4 +637,19 @@ document.addEventListener('DOMContentLoaded', async () => {
   loadCabins();
   document.getElementById('exportCsvBtn')?.addEventListener('click', exportCSV);
   document.getElementById('exportPdfBtn')?.addEventListener('click', exportPDF);
+  document.getElementById('targetSearchBtn')?.addEventListener('click', runTargetSearch);
+  document.getElementById('targetSearchInput')?.addEventListener('keydown', event => {
+    if(event.key === 'Enter'){
+      event.preventDefault();
+      runTargetSearch();
+    }
+  });
+  document.getElementById('targetSearchInput')?.addEventListener('input', event => {
+    const query = event.target.value.trim();
+    if(query.length < 2){
+      renderSearchSuggestions([]);
+      return;
+    }
+    renderSearchSuggestions(findSearchMatches(query));
+  });
 });
