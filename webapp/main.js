@@ -12,28 +12,22 @@ const MIN_LARGE_ROOF_CANDIDATE_M2 = 750;
 
 const officialGseAreas = [
   {
-    code: 'AC001E01364',
-    label: 'Vaprioenergy area GSE 1 - AC001E01364',
-    layer: 19,
-    arcgisLayer: 21,
-    objectId: 336,
-    sourceRef: 'dataSource_3-190075c1b0d-layer-19:336'
+    code: 'AC253E00019',
+    label: 'Vaprioenergy area GSE 2025-2027 - AC253E00019',
+    arcgisLayer: 0,
+    sourceRef: 'AC_Comuni_2025 layer 0 COD_AC AC253E00019'
   },
   {
     code: 'AC001E01397',
-    label: 'Vaprioenergy area GSE 2 - AC001E01397',
-    layer: 19,
-    arcgisLayer: 21,
-    objectId: 369,
-    sourceRef: 'dataSource_3-190075c1b0d-layer-19:369'
+    label: 'Vaprioenergy area GSE 2025-2027 - AC001E01397',
+    arcgisLayer: 0,
+    sourceRef: 'AC_Comuni_2025 layer 0 COD_AC AC001E01397'
   },
   {
     code: 'AC001E01398',
-    label: 'Vaprioenergy area GSE 3 - AC001E01398',
-    layer: 19,
-    arcgisLayer: 21,
-    objectId: 370,
-    sourceRef: 'dataSource_3-190075c1b0d-layer-19:370'
+    label: 'Vaprioenergy area GSE 2025-2027 - AC001E01398',
+    arcgisLayer: 0,
+    sourceRef: 'AC_Comuni_2025 layer 0 COD_AC AC001E01398'
   }
 ];
 
@@ -92,12 +86,17 @@ function loadCabins(){
 }
 
 async function fetchOfficialGseArea(area){
-  const query = new URLSearchParams({
+  const params = {
     code: area.code,
-    layer: String(area.layer),
-    serviceLayer: String(area.arcgisLayer),
-    objectId: String(area.objectId)
-  }).toString();
+    layer: String(area.layer || area.arcgisLayer || 0),
+    serviceLayer: String(area.arcgisLayer || 0)
+  };
+
+  if(area.objectId !== undefined && area.objectId !== null){
+    params.objectId = String(area.objectId);
+  }
+
+  const query = new URLSearchParams(params).toString();
 
   const data = await fetchJson('/api/gse-area?' + query);
 

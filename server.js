@@ -26,18 +26,24 @@ const overpassUrls = (
   .map(url => url.trim())
   .filter(Boolean);
 
+const currentGseAcLayerUrl = 'https://services-eu1.arcgis.com/sawHMGY9o8rHlY2j/arcgis/rest/services/AC_Comuni_2025/FeatureServer/0';
+const modifiedGseAcLayerUrl = 'https://services-eu1.arcgis.com/sawHMGY9o8rHlY2j/arcgis/rest/services/AC_Comuni_2025/FeatureServer/5';
+const legacyGseAcLayerUrl = 'https://services2.arcgis.com/pROHh69WvVijk4nR/arcgis/rest/services/AC_Comuni/FeatureServer/21';
+const currentGsePodAcTableUrl = 'https://mappe.gse.it/srvf/rest/services/TIAD2/POD_AC_2025/FeatureServer/13';
+const legacyGsePodAcTableUrl = 'https://mappe.gse.it/srvf/rest/services/TIAD2/POD_AC/FeatureServer/12';
+
 const gseFeatureLayerUrls = (
   process.env.GSE_FEATURE_LAYER_URLS ||
   process.env.GSE_FEATURE_LAYER_URL ||
   process.env.GSE_FEATURESERVER_URLS ||
   process.env.GSE_FEATURESERVER_URL ||
-  'https://services2.arcgis.com/pROHh69WvVijk4nR/arcgis/rest/services/AC_Comuni/FeatureServer/21'
+  [currentGseAcLayerUrl, modifiedGseAcLayerUrl, legacyGseAcLayerUrl].join(',')
 )
   .split(',')
   .map(url => url.trim())
   .filter(Boolean);
 
-const defaultGseArcgisLayer = String(process.env.GSE_ARCGIS_LAYER || '21');
+const defaultGseArcgisLayer = String(process.env.GSE_ARCGIS_LAYER || '0');
 const enrichmentEnabled = String(process.env.ENABLE_CONTACT_ENRICHMENT || 'true').toLowerCase() !== 'false';
 const wikidataEnrichmentEnabled = String(process.env.ENABLE_WIKIDATA_ENRICHMENT || 'true').toLowerCase() !== 'false';
 const enrichmentRadiusMeters = Number(process.env.ENRICHMENT_RADIUS_M || DEFAULT_MATCH_RADIUS_M);
@@ -54,8 +60,11 @@ app.use(express.json({ limit: '4mb' }));
 app.use(express.static(path.join(__dirname, 'webapp')));
 
 const allowedServices = {
-  ac_comuni_21: 'https://services2.arcgis.com/pROHh69WvVijk4nR/arcgis/rest/services/AC_Comuni/FeatureServer/21',
-  pod_ac_12: 'https://mappe.gse.it/srvf/rest/services/TIAD2/POD_AC/FeatureServer/12',
+  ac_comuni_2025: currentGseAcLayerUrl,
+  ac_comuni_2025_modified: modifiedGseAcLayerUrl,
+  ac_comuni_21: legacyGseAcLayerUrl,
+  pod_ac_2025: currentGsePodAcTableUrl,
+  pod_ac_12: legacyGsePodAcTableUrl,
 };
 
 const allowedParams = new Set([
@@ -182,6 +191,18 @@ function normalizeGseLayerUrl(url, serviceLayer = defaultGseArcgisLayer) {
   if (!clean) return '';
   if (/\/(?:FeatureServer|MapServer)\/\d+$/i.test(clean)) return clean;
   return `${clean}/${serviceLayer}`;
+}
+
+function escapeArcgisSqlString(value) {
+  return String(value || '').replace(/'/g, "''");
+}
+
+function isValidGseAreaCode(value) {
+  return /^AC\d{3}[A-Z]\d{5}$/.test(String(value || '').trim().toUpperCase());
+}
+
+function getArcgisFeatureId(properties, fallback) {
+  return properties.OBJECTID || properties.FID || properties.OBJECTID_1 || fallback;
 }
 
 function normalizeGeometry(input) {
@@ -826,16 +847,20 @@ app.get('/api/pod-search', async (req, res) => {
 app.get('/api/gse-area', async (req, res) => {
   try {
     const objectId = req.query.objectId;
-    const code = req.query.code || 'VAPRIO-GSE-370';
-    const sourceLayer = req.query.layer || '19';
+    const code = String(req.query.code || '').trim().toUpperCase();
     const serviceLayer = req.query.serviceLayer || req.query.arcgisLayer || defaultGseArcgisLayer;
+    const sourceLayer = req.query.layer || serviceLayer;
+    const hasObjectId = objectId !== undefined && objectId !== null && String(objectId).trim() !== '';
 
-    if (!objectId) {
-      return res.status(400).json({ error: 'Parametro objectId obbligatorio' });
+    if (!hasObjectId && !isValidGseAreaCode(code)) {
+      return res.status(400).json({
+        error: 'Parametro code obbligatorio nel formato AC000E00000, oppure objectId per compatibilita legacy.'
+      });
     }
 
     const errors = [];
     const tried = new Set();
+    const lookupLabel = hasObjectId ? `objectId ${objectId}` : `COD_AC ${code}`;
 
     for (const candidate of gseFeatureLayerUrls) {
       const layerUrl = normalizeGseLayerUrl(candidate, serviceLayer);
@@ -844,13 +869,20 @@ app.get('/api/gse-area', async (req, res) => {
 
       try {
         const targetUrl = new URL(`${layerUrl}/query`);
-        targetUrl.search = new URLSearchParams({
-          objectIds: String(objectId),
+        const queryParams = new URLSearchParams({
           outFields: '*',
           returnGeometry: 'true',
           outSR: '4326',
           f: 'geojson'
-        }).toString();
+        });
+
+        if (hasObjectId) {
+          queryParams.set('objectIds', String(objectId));
+        } else {
+          queryParams.set('where', `COD_AC='${escapeArcgisSqlString(code)}'`);
+        }
+
+        targetUrl.search = queryParams.toString();
 
         const response = await fetch(targetUrl.href, {
           headers: {
@@ -877,24 +909,27 @@ app.get('/api/gse-area', async (req, res) => {
         }
 
         if (!data.features || !data.features.length) {
-          errors.push(`${layerUrl} -> nessuna feature per objectId ${objectId}`);
+          errors.push(`${layerUrl} -> nessuna feature per ${lookupLabel}`);
           continue;
         }
 
         data.features = data.features.map((feature, idx) => {
           const properties = feature.properties || {};
+          const featureId = getArcgisFeatureId(properties, `${code || 'gse'}-${idx}`);
           return {
             type: 'Feature',
-            id: feature.id || properties.OBJECTID || `${code}-${idx}`,
+            id: feature.id || featureId,
             geometry: feature.geometry,
             properties: Object.assign({}, properties, {
               COD_AC: properties.COD_AC || code,
-              NOME: properties.NOME || properties.RAG_SOC || 'Vaprio d Adda - area GSE ufficiale',
-              COMUNE: properties.COMUNE || 'Vaprio d Adda',
-              SOURCE_REF: `dataSource_3-190075c1b0d-layer-${sourceLayer}:${objectId}`,
+              NOME: properties.NOME || properties.RAG_SOC || `Area GSE ${properties.COD_AC || code}`,
+              SOURCE_REF: hasObjectId
+                ? `dataSource_3-190075c1b0d-layer-${sourceLayer}:${objectId}`
+                : `${layerUrl} COD_AC=${properties.COD_AC || code}`,
               GSE_SOURCE_LAYER: sourceLayer,
               GSE_ARCGIS_LAYER: serviceLayer,
-              GSE_OBJECTID: objectId,
+              GSE_LOOKUP_FIELD: hasObjectId ? 'objectIds' : 'COD_AC',
+              GSE_OBJECTID: getArcgisFeatureId(properties, objectId || null),
               GSE_FEATURE_LAYER: layerUrl
             })
           };
@@ -905,7 +940,9 @@ app.get('/api/gse-area', async (req, res) => {
           featureLayer: layerUrl,
           sourceLayer,
           arcgisLayer: serviceLayer,
-          objectId: String(objectId)
+          code: code || (data.features[0].properties && data.features[0].properties.COD_AC),
+          lookupField: hasObjectId ? 'objectIds' : 'COD_AC',
+          objectId: hasObjectId ? String(objectId) : null
         });
 
         return res.json(data);
@@ -915,7 +952,7 @@ app.get('/api/gse-area', async (req, res) => {
     }
 
     return res.status(502).json({
-      error: 'Geometria GSE non caricata. Endpoint/layer/objectId da verificare.',
+      error: 'Geometria GSE non caricata. Endpoint/layer/codice area da verificare.',
       details: errors
     });
   } catch (error) {
