@@ -11,8 +11,8 @@ L'app consente di:
 - escludere dalla mappa e dagli export gli enti presenti nella lista scarti configurabile;
 - esportare una lista CSV/PDF per le successive verifiche manuali.
 
-> Nota: le aree GSE vengono caricate tramite il proxy backend `/api/gse-area`, usando il layer ArcGIS reale `AC_Comuni/FeatureServer/21`.
-> Le tre aree configurate sono `AC001E01364`, `AC001E01397` e `AC001E01398`.
+> Nota: le aree GSE vengono caricate tramite il proxy backend `/api/gse-area`, usando il layer ArcGIS reale 2025-2027 `AC_Comuni_2025/FeatureServer/0`.
+> Le tre aree configurate sono `AC253E00019`, `AC001E01397` e `AC001E01398`; il lookup avviene per `COD_AC`, non per `OBJECTID`/`FID`.
 
 ## Esecuzione locale
 
