@@ -117,14 +117,19 @@ L'export include sia il nome usato per outreach sia i campi arricchiti e la rela
 
 L'export usa un set fisso di colonne pensate per outreach CER, cosi resta semplice da usare e stabile tra CSV e PDF:
 
-- nome target;
-- priorita;
+- cabina GSE;
+- priorita e score 0-100;
+- nome target migliore disponibile;
 - superficie edificio stimata;
 - categoria macro e sotto-categoria;
 - indirizzo se disponibile;
-- telefono, sito, email se disponibili in OSM;
+- telefono, email e sito migliori disponibili;
+- fonte del nome/arricchimento;
+- motivo selezione;
 - coordinate;
 - livello di confidenza;
 - note di verifica.
+
+Il file CSV operativo viene nominato come `longlist_CER_<COD_AC>_<data>.csv`; il PDF resta un report sintetico per lettura rapida.
 
 I dati OSM sono utili per screening preliminare, ma vanno verificati prima di qualsiasi contatto formale.

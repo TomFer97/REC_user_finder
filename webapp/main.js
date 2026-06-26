@@ -187,7 +187,8 @@ function enrichFeatures(features, code){
       const cat = categorizeFeature(p);
       const coords = getCoordinates(f);
       const address = formatAddress(p);
-      const priority = calculateOutreachPriority(Object.assign({}, p, { address }), cat);
+      const scoreDetails = scoreOutreachCandidate(Object.assign({}, p, { address }), cat);
+      const priority = priorityFromScore(scoreDetails.score);
       const buildingArea = getBuildingArea(p);
       const osmDisplayName = p.osm_display_name || p.name || p.operator || p.brand || p.shop || p.craft || p.office || p.amenity || p.leisure || p.tourism || p.healthcare || p.building || p.landuse || 'Da verificare';
       const enrichedName = firstValue(p.enriched_name, osmDisplayName);
@@ -203,6 +204,8 @@ function enrichFeatures(features, code){
           osm_name_original: osmDisplayName,
           outreach_name: enrichedName,
           priorita_outreach: priority,
+          outreach_score: scoreDetails.score,
+          motivo_selezione: scoreDetails.reasons.join('; '),
           building_area_m2: buildingArea || '',
           building_area_label: formatBuildingArea(buildingArea),
           note_verifica: buildVerificationNote(p, cat)
@@ -213,7 +216,7 @@ function enrichFeatures(features, code){
       const p = f.properties || {};
       return p.category_macro && (p.outreach_name !== 'Da verificare' || p.confidence !== 'bassa' || isLargeRoofCandidate(p));
     })
-    .sort((a,b) => priorityRank(a.properties.priorita_outreach) - priorityRank(b.properties.priorita_outreach) || getBuildingArea(b.properties) - getBuildingArea(a.properties) || String(a.properties.category_macro).localeCompare(String(b.properties.category_macro)) || String(a.properties.outreach_name).localeCompare(String(b.properties.outreach_name)));
+    .sort((a,b) => Number(b.properties.outreach_score || 0) - Number(a.properties.outreach_score || 0) || getBuildingArea(b.properties) - getBuildingArea(a.properties) || String(a.properties.category_macro).localeCompare(String(b.properties.category_macro)) || String(a.properties.outreach_name).localeCompare(String(b.properties.outreach_name)));
 }
 
 function priorityRank(value){
@@ -277,25 +280,78 @@ function buildVerificationNote(p, cat){
   return 'Potenziale utenza non domestica identificata da tag OSM.';
 }
 
-function calculateOutreachPriority(p, cat){
+function addScorePart(parts, points, reason){
+  if(points > 0) parts.push({ points, reason });
+}
+
+function hasUsefulTargetName(p){
+  const value = firstValue(p.enriched_name, p.name, p.operator, p.brand);
+  return value && normalizeSearchText(value) !== 'da verificare';
+}
+
+function hasContactInfo(p){
+  return Boolean(firstValue(
+    p.enriched_phone,
+    p.phone,
+    p['contact:phone'],
+    p.enriched_email,
+    p.email,
+    p['contact:email'],
+    p.enriched_website,
+    p.website,
+    p.url,
+    p['contact:website']
+  ));
+}
+
+function scoreOutreachCandidate(p, cat){
+  const parts = [];
   let score = 0;
   const macro = (cat.macro || '').toLowerCase();
   const sub = (cat.sub || '').toLowerCase();
   const confidence = (p.confidence || '').toLowerCase();
   const area = getBuildingArea(p);
-  if(['negozi e servizi locali','artigiani e laboratori','uffici e pmi','servizi pubblici e collettivi','spazi pubblici e collettivi','istruzione e formazione','sanita e assistenza','sport e tempo libero'].includes(macro)) score += 2;
-  if(sub.includes('supermercato') || sub.includes('alimentari') || sub.includes('macelleria') || sub.includes('panetteria') || sub.includes('farmacia') || sub.includes('scuola') || sub.includes('university') || sub.includes('sports') || sub.includes('hospital')) score += 2;
-  if(area >= 3000) score += 3;
-  else if(area >= 1500) score += 2;
-  else if(area >= MIN_LARGE_ROOF_CANDIDATE_M2) score += 1;
-  if(p.enriched_name || p.name || p.operator || p.brand) score += 1;
-  if(p['addr:street'] || p.address) score += 1;
-  if(p.enriched_phone || p.enriched_email || p.enriched_website || p.phone || p['contact:phone'] || p.email || p.website || p.url) score += 1;
-  if(p.enrichment_source && p.enrichment_source !== 'OpenStreetMap') score += 1;
-  if(confidence === 'alta') score += 2;
-  else if(confidence === 'media') score += 1;
-  if(score >= 6) return 'alta';
-  if(score >= 3) return 'media';
+
+  if(['negozi e servizi locali','artigiani e laboratori','uffici e pmi','servizi pubblici e collettivi','spazi pubblici e collettivi','istruzione e formazione','sanita e assistenza','sport e tempo libero'].includes(macro)){
+    addScorePart(parts, 20, 'categoria adatta a una longlist CER');
+  }else if(macro === 'edificio potenzialmente non domestico'){
+    addScorePart(parts, 10, 'edificio non domestico da qualificare');
+  }
+
+  if(sub.includes('supermercato') || sub.includes('alimentari') || sub.includes('macelleria') || sub.includes('panetteria') || sub.includes('farmacia')){
+    addScorePart(parts, 15, 'attivita locale con consumo ricorrente');
+  }else if(sub.includes('scuola') || sub.includes('university') || sub.includes('hospital')){
+    addScorePart(parts, 15, 'servizio collettivo energivoro');
+  }else if(sub.includes('sports') || sub.includes('sport')){
+    addScorePart(parts, 12, 'impianto sportivo o tempo libero');
+  }
+
+  if(area >= 3000) addScorePart(parts, 25, 'tetto molto grande >= 3.000 mq');
+  else if(area >= 1500) addScorePart(parts, 18, 'tetto grande >= 1.500 mq');
+  else if(area >= MIN_LARGE_ROOF_CANDIDATE_M2) addScorePart(parts, 12, 'tetto interessante >= 750 mq');
+  else if(area >= 250) addScorePart(parts, 6, 'superficie edificio disponibile');
+
+  if(hasUsefulTargetName(p)) addScorePart(parts, 10, 'nome o gestore disponibile');
+  if(p['addr:street'] || p.address) addScorePart(parts, 8, 'indirizzo disponibile');
+  if(hasContactInfo(p)) addScorePart(parts, 10, 'contatto disponibile');
+  if(p.enrichment_source && p.enrichment_source !== 'OpenStreetMap') addScorePart(parts, 7, 'arricchito da fonte esterna');
+  if(confidence === 'alta') addScorePart(parts, 10, 'confidenza alta');
+  else if(confidence === 'media') addScorePart(parts, 5, 'confidenza media');
+
+  score = Math.min(100, parts.reduce((total, part) => total + part.points, 0));
+  const reasons = parts
+    .sort((a, b) => b.points - a.points)
+    .slice(0, 3)
+    .map(part => part.reason);
+
+  if(!reasons.length) reasons.push('segnale debole: verificare manualmente');
+  return { score, reasons };
+}
+
+function priorityFromScore(score){
+  const value = Number(score) || 0;
+  if(value >= 70) return 'alta';
+  if(value >= 40) return 'media';
   return 'bassa';
 }
 
@@ -308,7 +364,7 @@ function renderResults(features, meta, filterMeta = {}){
       const p = f.properties || {};
       featureLayerById.set(p.search_id, layer);
       const contactLine = firstValue(p.enriched_phone, p.phone, p['contact:phone'], p.enriched_email, p.email, p['contact:email'], p.enriched_website, p.website, p.url);
-      layer.bindPopup('<strong>' + esc(p.outreach_name) + '</strong><br>' + esc(p.category_macro) + (p.category_sub ? ' / ' + esc(p.category_sub) : '') + '<br>' + esc(p.address || '') + '<br>Superficie: ' + esc(formatBuildingArea(p.building_area_m2)) + '<br>Priorita: ' + esc(p.priorita_outreach || '') + '<br>Fonte arricchimento: ' + esc(p.enrichment_source || 'n.d.') + (contactLine ? '<br>Contatto: ' + esc(contactLine) : '') + '<br>Confidenza: ' + esc(p.confidence || ''));
+      layer.bindPopup('<strong>' + esc(p.outreach_name) + '</strong><br>' + esc(p.category_macro) + (p.category_sub ? ' / ' + esc(p.category_sub) : '') + '<br>' + esc(p.address || '') + '<br>Superficie: ' + esc(formatBuildingArea(p.building_area_m2)) + '<br>Score: ' + esc(p.outreach_score || 0) + '/100 (' + esc(p.priorita_outreach || '') + ')' + '<br>Motivo: ' + esc(p.motivo_selezione || 'n.d.') + '<br>Fonte arricchimento: ' + esc(p.enrichment_source || 'n.d.') + (contactLine ? '<br>Contatto: ' + esc(contactLine) : '') + '<br>Confidenza: ' + esc(p.confidence || ''));
     }
   }).addTo(map);
   try{ if(features.length) map.fitBounds(resultsLayer.getBounds().pad(0.2)); }catch(e){}
@@ -330,7 +386,7 @@ function populateLongList(features){
     const el = document.createElement('div');
     el.className = 'result-item';
     el.dataset.searchId = p.search_id || '';
-    el.innerHTML = '<strong>' + esc(p.outreach_name) + '</strong><br><small>Priorita: ' + esc(p.priorita_outreach || 'n.d.') + '<br>Superficie: ' + esc(formatBuildingArea(p.building_area_m2)) + '<br>' + esc(p.category_macro) + (p.category_sub ? ' / ' + esc(p.category_sub) : '') + '<br>' + esc(p.address || 'Indirizzo non disponibile') + '<br>Fonte arricchimento: ' + esc(p.enrichment_source || 'n.d.') + '<br>Confidenza: ' + esc(p.confidence || 'n.d.') + '</small>';
+    el.innerHTML = '<strong>' + esc(p.outreach_name) + '</strong><br><small>Score: ' + esc(p.outreach_score || 0) + '/100 - Priorita: ' + esc(p.priorita_outreach || 'n.d.') + '<br>Motivo: ' + esc(p.motivo_selezione || 'n.d.') + '<br>Superficie: ' + esc(formatBuildingArea(p.building_area_m2)) + '<br>' + esc(p.category_macro) + (p.category_sub ? ' / ' + esc(p.category_sub) : '') + '<br>' + esc(p.address || 'Indirizzo non disponibile') + '<br>Fonte arricchimento: ' + esc(p.enrichment_source || 'n.d.') + '<br>Confidenza: ' + esc(p.confidence || 'n.d.') + '</small>';
     el.addEventListener('click', () => focusFeatureOnMap(f));
     div.appendChild(el);
   });
@@ -494,28 +550,34 @@ function exportRows(){
     const email = firstValue(p.enriched_email, p.email, p['contact:email']);
     const website = firstValue(p.enriched_website, p.website, p.url, p['contact:website']);
     return {
-      Nome: p.outreach_name || '',
-      Nome_OSM: p.osm_name_original || '',
-      Nome_arricchito: p.enriched_name || '',
-      Fonte_arricchimento: p.enrichment_source || '',
-      Confidenza_arricchimento: p.enrichment_confidence || '',
+      Cabina: p.cabina_cod_ac || selectedCabinCode || '',
       Priorita: p.priorita_outreach || '',
+      Score: p.outreach_score || '',
+      Nome: p.outreach_name || '',
       Superficie_mq: p.building_area_m2 || '',
       Categoria: [p.category_macro, p.category_sub].filter(Boolean).join(' / '),
       Indirizzo: p.address || '',
       Telefono: phone,
-      Telefono_arricchito: p.enriched_phone || '',
       Email: email,
-      Email_arricchita: p.enriched_email || '',
       Sito: website,
-      Sito_arricchito: p.enriched_website || '',
-      Latitudine: p.lat || '',
-      Longitudine: p.lon || '',
+      Fonte_nome: p.enrichment_source || 'OpenStreetMap',
       Confidenza: p.confidence || '',
+      Motivo_selezione: p.motivo_selezione || '',
       Note: [p.note_verifica, p.enrichment_note].filter(Boolean).join(' '),
+      Lat: p.lat || '',
+      Lon: p.lon || '',
       OSM: osmReference(p)
     };
   });
+}
+
+function exportDateStamp(){
+  return new Date().toISOString().slice(0, 10);
+}
+
+function exportFileName(extension, prefix = 'longlist_CER'){
+  const cabin = selectedCabinCode || 'export';
+  return [prefix, cabin, exportDateStamp()].join('_') + '.' + extension;
 }
 
 function exportCSV(){
@@ -528,7 +590,7 @@ function exportCSV(){
   const url = URL.createObjectURL(blob);
   const a = document.createElement('a');
   a.href = url;
-  a.download = 'vaprio_potenziali_utenti_non_domestici_' + (selectedCabinCode || 'export') + '.csv';
+  a.download = exportFileName('csv');
   document.body.appendChild(a);
   a.click();
   a.remove();
@@ -546,30 +608,34 @@ async function exportPDF(){
   const doc = new jsPDF({ unit: 'pt', format: 'a4', orientation: 'landscape' });
   const body = exportRows().map(row => [
     row.Nome,
+    row.Score,
     row.Priorita,
     row.Superficie_mq ? formatBuildingArea(row.Superficie_mq) : '',
     row.Categoria,
     row.Indirizzo,
-    row.Telefono,
-    row.Email || row.Sito,
-    row.Fonte_arricchimento
+    firstValue(row.Telefono, row.Email, row.Sito),
+    row.Motivo_selezione
   ]);
-  doc.text('Potenziali utenze non domestiche - Vaprio d Adda', 40, 40);
+  doc.text('Longlist consumer CER - Vaprio d Adda', 40, 40);
+  doc.setFontSize(9);
+  doc.text('Cabina: ' + (selectedCabinCode || 'n.d.') + ' - Generato: ' + exportDateStamp() + ' - Risultati: ' + osmResults.length, 40, 55);
   doc.autoTable({
-    head: [['Nome','Priorita','Superficie','Categoria','Indirizzo','Telefono','Email/Sito','Fonte']],
+    head: [['Nome','Score','Priorita','Superficie','Categoria','Indirizzo','Contatto','Motivo']],
     body,
-    startY: 60,
+    startY: 72,
     styles: { fontSize: 8, cellPadding: 3, overflow: 'linebreak' },
     headStyles: { fillColor: [26, 115, 232] },
     columnStyles: {
       0: { cellWidth: 120 },
-      3: { cellWidth: 130 },
-      4: { cellWidth: 160 },
-      6: { cellWidth: 120 },
-      7: { cellWidth: 90 }
+      1: { cellWidth: 38 },
+      2: { cellWidth: 50 },
+      4: { cellWidth: 115 },
+      5: { cellWidth: 150 },
+      6: { cellWidth: 110 },
+      7: { cellWidth: 165 }
     }
   });
-  doc.save('vaprio_potenziali_utenti_' + (selectedCabinCode || 'export') + '.pdf');
+  doc.save(exportFileName('pdf', 'report_CER'));
 }
 
 function categorizeFeature(p){
