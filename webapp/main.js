@@ -7,10 +7,15 @@ let selectedCabinCode = '';
 let excludedEntityConfig = { rules: [] };
 let excludedEntityResults = [];
 let featureLayerById = new Map();
+let officialGseAreas = [];
+let selectedGseAreaMeta = {};
+let lastSearchMeta = {};
 
 const MIN_LARGE_ROOF_CANDIDATE_M2 = 750;
+const APP_VERSION = '0.1.0';
+const EXPORT_DISCLAIMER = 'Screening preliminare per outreach CER: dati da verificare prima di contatti formali o valutazioni di ammissibilita.';
 
-const officialGseAreas = [
+const fallbackOfficialGseAreas = [
   {
     code: 'AC253E00019',
     label: 'Vaprioenergy area GSE 2025-2027 - AC253E00019',
@@ -67,6 +72,24 @@ async function loadExcludedEntityRules(){
   }catch(err){
     console.warn('Lista enti esclusi non caricata:', err.message);
     excludedEntityConfig = { rules: [] };
+  }
+}
+
+function normalizeGseAreasConfig(data){
+  const areas = Array.isArray(data) ? data : data && data.areas;
+  return Array.isArray(areas)
+    ? areas.filter(area => area && area.code && area.label)
+    : [];
+}
+
+async function loadOfficialGseAreas(){
+  try{
+    const data = await fetchJson('data/gse-areas.json');
+    const areas = normalizeGseAreasConfig(data);
+    officialGseAreas = areas.length ? areas : fallbackOfficialGseAreas;
+  }catch(err){
+    console.warn('Configurazione aree GSE non caricata, uso fallback:', err.message);
+    officialGseAreas = fallbackOfficialGseAreas;
   }
 }
 
@@ -157,6 +180,13 @@ async function selectOfficialGseArea(area, trigger){
     const geo = await fetchOfficialGseArea(area);
     const feature = geo.features && geo.features[0];
     if(!feature) throw new Error('Area GSE non trovata');
+    selectedGseAreaMeta = {
+      code: area.code,
+      sourceRef: area.sourceRef,
+      featureLayer: geo.meta && geo.meta.featureLayer,
+      lookupField: geo.meta && geo.meta.lookupField,
+      generatedAt: geo.meta && geo.meta.generatedAt
+    };
 
     if(selectedLayer) selectedLayer.remove();
     selectedLayer = L.geoJSON(feature, { style: { color: '#00a5ff', weight: 3, fillOpacity: 0.12 } }).addTo(map);
@@ -168,6 +198,7 @@ async function selectOfficialGseArea(area, trigger){
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ geojson: feature.geometry })
     });
+    lastSearchMeta = osm.meta || {};
     const enrichedResults = enrichFeatures(osm.features || [], area.code);
     const filteredResults = filterExcludedEntities(enrichedResults);
     excludedEntityResults = filteredResults.excluded;
@@ -543,13 +574,34 @@ function osmReference(p){
   return p._osm_type + '/' + p._osm_id;
 }
 
-function exportRows(){
+function buildExportContext(){
+  return {
+    generatedAt: new Date().toISOString(),
+    appVersion: APP_VERSION,
+    disclaimer: EXPORT_DISCLAIMER,
+    gseSource: selectedGseAreaMeta.featureLayer || selectedGseAreaMeta.sourceRef || '',
+    gseLookupField: selectedGseAreaMeta.lookupField || 'COD_AC',
+    targetSource: lastSearchMeta.source === 'mock' ? 'mock' : 'OpenStreetMap/Overpass',
+    queryModes: Array.isArray(lastSearchMeta.queryModes) ? lastSearchMeta.queryModes.join(', ') : '',
+    overpassEndpointsUsed: Array.isArray(lastSearchMeta.overpassEndpointsUsed) ? lastSearchMeta.overpassEndpointsUsed.join(', ') : ''
+  };
+}
+
+function exportRows(context = buildExportContext()){
   return osmResults.map(feature => {
     const p = feature.properties || {};
     const phone = firstValue(p.enriched_phone, p.phone, p['contact:phone']);
     const email = firstValue(p.enriched_email, p.email, p['contact:email']);
     const website = firstValue(p.enriched_website, p.website, p.url, p['contact:website']);
     return {
+      Generato_il: context.generatedAt,
+      Versione_app: context.appVersion,
+      Uso_dati: context.disclaimer,
+      Fonte_area_GSE: context.gseSource,
+      Lookup_area_GSE: context.gseLookupField,
+      Fonte_target: context.targetSource,
+      Modalita_query: context.queryModes,
+      Endpoint_Overpass_usati: context.overpassEndpointsUsed,
       Cabina: p.cabina_cod_ac || selectedCabinCode || '',
       Priorita: p.priorita_outreach || '',
       Score: p.outreach_score || '',
@@ -582,7 +634,7 @@ function exportFileName(extension, prefix = 'longlist_CER'){
 
 function exportCSV(){
   if(!osmResults.length){ alert('Nessun risultato da esportare'); return; }
-  const rows = exportRows();
+  const rows = exportRows(buildExportContext());
   const headers = Object.keys(rows[0]);
   const csvRows = rows.map(row => headers.map(header => csvCell(row[header])).join(';'));
   const csv = '\ufeff' + [headers.join(';'), ...csvRows].join('\n');
@@ -606,7 +658,8 @@ async function exportPDF(){
   if(!osmResults.length){ alert('Nessun risultato da esportare'); return; }
   const { jsPDF } = window.jspdf;
   const doc = new jsPDF({ unit: 'pt', format: 'a4', orientation: 'landscape' });
-  const body = exportRows().map(row => [
+  const context = buildExportContext();
+  const body = exportRows(context).map(row => [
     row.Nome,
     row.Score,
     row.Priorita,
@@ -618,11 +671,13 @@ async function exportPDF(){
   ]);
   doc.text('Longlist consumer CER - Vaprio d Adda', 40, 40);
   doc.setFontSize(9);
-  doc.text('Cabina: ' + (selectedCabinCode || 'n.d.') + ' - Generato: ' + exportDateStamp() + ' - Risultati: ' + osmResults.length, 40, 55);
+  doc.text('Cabina: ' + (selectedCabinCode || 'n.d.') + ' - Generato: ' + context.generatedAt + ' - Risultati: ' + osmResults.length, 40, 55);
+  doc.text('Fonte target: ' + context.targetSource + ' - Fonte area: ' + (context.gseSource || 'n.d.'), 40, 68);
+  doc.text(context.disclaimer, 40, 81, { maxWidth: 760 });
   doc.autoTable({
     head: [['Nome','Score','Priorita','Superficie','Categoria','Indirizzo','Contatto','Motivo']],
     body,
-    startY: 72,
+    startY: 96,
     styles: { fontSize: 8, cellPadding: 3, overflow: 'linebreak' },
     headStyles: { fillColor: [26, 115, 232] },
     columnStyles: {
@@ -698,6 +753,7 @@ function categorizeFeature(p){
 }
 
 document.addEventListener('DOMContentLoaded', async () => {
+  await loadOfficialGseAreas();
   await loadExcludedEntityRules();
   loadCabins();
   document.getElementById('exportCsvBtn')?.addEventListener('click', exportCSV);

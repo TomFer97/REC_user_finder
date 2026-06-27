@@ -1,4 +1,4 @@
-# REC_user_finding
+# REC_user_finder
 
 Webapp preliminare per supportare Vaprioenergy nell'identificazione di potenziali utenti non domestici da coinvolgere nella comunita energetica.
 
@@ -65,6 +65,7 @@ Di default l'app prova a usare Overpass reale.
 - `/api/gse-area`: proxy backend per le geometrie ufficiali GSE.
 - `/api/osm-search`: ricerca Overpass su target non domestici, spazi pubblici/collettivi e geometrie edificio.
 - `webapp/data/excluded-entities.json`: lista configurabile di enti, insegne o operatori da scartare.
+- `webapp/data/gse-areas.json`: configurazione delle tre aree ufficiali GSE Vaprioenergy usate dalla UI.
 - `webapp/data/enrichment/`: dataset locali opzionali per arricchire nome, telefono, email e sito.
 - `webapp/data/cabins.json` e `webapp/data/areas.json`: dati legacy non usati dalla UI principale.
 - `webapp/data/osm-mock.json`: dati demo usati solo con `USE_MOCK_OSM=true`.
@@ -117,6 +118,10 @@ L'export include sia il nome usato per outreach sia i campi arricchiti e la rela
 
 L'export usa un set fisso di colonne pensate per outreach CER, cosi resta semplice da usare e stabile tra CSV e PDF:
 
+- data e ora di generazione;
+- versione app;
+- disclaimer operativo sullo screening preliminare;
+- fonte area GSE, campo di lookup e fonte target;
 - cabina GSE;
 - priorita e score 0-100;
 - nome target migliore disponibile;
@@ -130,6 +135,6 @@ L'export usa un set fisso di colonne pensate per outreach CER, cosi resta sempli
 - livello di confidenza;
 - note di verifica.
 
-Il file CSV operativo viene nominato come `longlist_CER_<COD_AC>_<data>.csv`; il PDF resta un report sintetico per lettura rapida.
+Il file CSV operativo viene nominato come `longlist_CER_<COD_AC>_<data>.csv`; il PDF resta un report sintetico per lettura rapida e riporta in testata fonte, data e disclaimer.
 
 I dati OSM sono utili per screening preliminare, ma vanno verificati prima di qualsiasi contatto formale.

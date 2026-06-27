@@ -1,0 +1,22 @@
+{
+  "areas": [
+    {
+      "code": "AC253E00019",
+      "label": "Vaprioenergy area GSE 2025-2027 - AC253E00019",
+      "arcgisLayer": 0,
+      "sourceRef": "AC_Comuni_2025 layer 0 COD_AC AC253E00019"
+    },
+    {
+      "code": "AC001E01397",
+      "label": "Vaprioenergy area GSE 2025-2027 - AC001E01397",
+      "arcgisLayer": 0,
+      "sourceRef": "AC_Comuni_2025 layer 0 COD_AC AC001E01397"
+    },
+    {
+      "code": "AC001E01398",
+      "label": "Vaprioenergy area GSE 2025-2027 - AC001E01398",
+      "arcgisLayer": 0,
+      "sourceRef": "AC_Comuni_2025 layer 0 COD_AC AC001E01398"
+    }
+  ]
+}

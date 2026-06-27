@@ -1,6 +1,5 @@
 const express = require('express');
 const cors = require('cors');
-const fetch = require('node-fetch');
 const path = require('path');
 const fs = require('fs');
 const {
@@ -12,6 +11,11 @@ const {
   candidateFromDirectoryRecord,
   matchLocalRecords
 } = require('./enrichment');
+
+const fetch = globalThis.fetch;
+if (typeof fetch !== 'function') {
+  throw new Error('Node.js 18+ is required because this app uses the native fetch API.');
+}
 
 const app = express();
 const port = process.env.PORT || 3000;
@@ -139,6 +143,20 @@ LIMIT 12
 `;
 }
 
+async function fetchWithTimeout(url, options = {}, timeoutMs = 0) {
+  const ms = Number(timeoutMs);
+  if (!Number.isFinite(ms) || ms <= 0) return fetch(url, options);
+
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), ms);
+
+  try {
+    return await fetch(url, Object.assign({}, options, { signal: controller.signal }));
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
 async function fetchWikidataCandidates(feature) {
   const point = featurePoint(feature);
   if (!point) return [];
@@ -153,13 +171,12 @@ async function fetchWikidataCandidates(feature) {
     format: 'json'
   });
 
-  const response = await fetch(`${wikidataEndpoint}?${params.toString()}`, {
+  const response = await fetchWithTimeout(`${wikidataEndpoint}?${params.toString()}`, {
     headers: {
       Accept: 'application/sparql-results+json',
-      'User-Agent': 'REC_user_finding/0.1 (+https://github.com/TomFer97/REC_user_finding)'
-    },
-    timeout: wikidataTimeoutMs
-  });
+      'User-Agent': 'REC_user_finder/0.1 (+https://github.com/TomFer97/REC_user_finder)'
+    }
+  }, wikidataTimeoutMs);
 
   if (!response.ok) {
     const text = await response.text();
@@ -332,7 +349,7 @@ async function fetchOverpassWithFallback(query, label = 'query') {
         headers: {
           'Content-Type': 'application/x-www-form-urlencoded;charset=UTF-8',
           Accept: '*/*',
-          'User-Agent': 'REC_user_finding/0.1 (+https://github.com/TomFer97/REC_user_finding)'
+          'User-Agent': 'REC_user_finder/0.1 (+https://github.com/TomFer97/REC_user_finder)'
         },
         body: new URLSearchParams({ data: query })
       });
@@ -1033,7 +1050,7 @@ app.get('/api/query', async (req, res) => {
   }
 });
 
-app.get('*', (req, res) => {
+app.get(/.*/, (req, res) => {
   res.sendFile(path.join(__dirname, 'webapp', 'index.html'));
 });
 
@@ -1056,4 +1073,15 @@ function startServer(preferredPort, attempts = 0) {
   });
 }
 
-startServer(port);
+if (require.main === module) {
+  startServer(port);
+}
+
+module.exports = {
+  app,
+  buildNonResidentialQuery,
+  fetchWithTimeout,
+  isValidGseAreaCode,
+  normalizeGseLayerUrl,
+  startServer
+};
