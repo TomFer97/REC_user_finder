@@ -1,16 +1,15 @@
 {
-  "name": "rec-user-finding",
+  "name": "rec-user-finder",
   "version": "0.1.0",
   "private": true,
   "description": "Backend proxy and webapp to identify potential non-domestic REC users in Vaprio d Adda.",
   "main": "server.js",
   "scripts": {
     "start": "node server.js",
-    "test": "node --check server.js && node --check webapp/main.js && node --check webapp/large-enterprise-filter.js && node --check enrichment.js && node tests/large-enterprise-filter.test.js && node tests/enrichment.test.js"
+    "test": "node --check server.js && node --check webapp/main.js && node --check webapp/large-enterprise-filter.js && node --check enrichment.js && node tests/large-enterprise-filter.test.js && node tests/enrichment.test.js && node tests/gse-areas-config.test.js && node tests/backend-routes.test.js"
   },
   "dependencies": {
     "cors": "^2.8.5",
-    "express": "^5.2.1",
-    "node-fetch": "^3.3.2"
+    "express": "^5.2.1"
   }
 }
