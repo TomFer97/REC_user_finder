@@ -6,7 +6,10 @@
   "main": "server.js",
   "scripts": {
     "start": "node server.js",
-    "test": "node --check server.js && node --check webapp/main.js && node --check webapp/large-enterprise-filter.js && node --check enrichment.js && node tests/large-enterprise-filter.test.js && node tests/enrichment.test.js"
+    "test:syntax": "node --check server.js && node --check webapp/main.js && node --check webapp/large-enterprise-filter.js && node --check enrichment.js",
+    "test:unit": "node tests/large-enterprise-filter.test.js && node tests/enrichment.test.js",
+    "test:startup": "node --test tests/server-startup.test.js",
+    "test": "npm run test:syntax && npm run test:unit && npm run test:startup"
   },
   "dependencies": {
     "cors": "^2.8.5",

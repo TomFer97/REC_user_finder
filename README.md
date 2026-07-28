@@ -1,4 +1,4 @@
-# REC_user_finding
+# REC User Finder
 
 Webapp preliminare per supportare Vaprioenergy nell'identificazione di potenziali utenti non domestici da coinvolgere nella comunita energetica.
 
@@ -14,16 +14,38 @@ L'app consente di:
 > Nota: le aree GSE vengono caricate tramite il proxy backend `/api/gse-area`, usando il layer ArcGIS reale 2025-2027 `AC_Comuni_2025/FeatureServer/0`.
 > Le tre aree configurate sono `AC253E00019`, `AC001E01397` e `AC001E01398`; il lookup avviene per `COD_AC`, non per `OBJECTID`/`FID`.
 
-## Esecuzione locale
+## Requisiti
+
+- Node.js 24 LTS consigliato oppure Node.js 22 LTS;
+- npm, incluso nell'installazione di Node.js;
+- connessione Internet per interrogare GSE/ArcGIS, Overpass e, se abilitato, Wikidata.
+
+Verificare le versioni installate:
 
 ```bash
-npm install
+node --version
+npm --version
+```
+
+## Esecuzione locale
+
+Dalla cartella principale del progetto:
+
+```bash
+npm ci
+npm test
 npm start
+```
+
+L'output atteso e' simile a:
+
+```text
+Server listening on http://localhost:3000
 ```
 
 Aprire:
 
-```bash
+```text
 http://localhost:3000
 ```
 
@@ -39,13 +61,54 @@ $env:PORT=3001; npm start
 npm test
 ```
 
-Il test controlla la sintassi del backend e del JavaScript frontend principale.
+I test controllano:
+
+- la sintassi del backend e del JavaScript frontend principale;
+- il filtro delle grandi imprese e l'arricchimento dei dati;
+- l'avvio reale del server e la rotta fallback della webapp.
+
+## Aggiornamento di una copia esistente
+
+Se il progetto e' stato clonato con Git:
+
+```bash
+git pull
+npm ci
+npm test
+npm start
+```
+
+Se il progetto e' stato scaricato come file ZIP, scaricare nuovamente la versione aggiornata e ripetere i comandi dalla nuova cartella.
+
+## Risoluzione dei problemi
+
+### `Missing parameter name at index 1: *`
+
+La copia locale contiene una vecchia rotta wildcard non compatibile con Express 5. Aggiornare il repository con `git pull`, oppure scaricare nuovamente lo ZIP, quindi eseguire:
+
+```bash
+npm ci
+npm test
+npm start
+```
+
+La versione corretta usa la rotta nominata richiesta da Express 5:
+
+```js
+app.get('/{*splat}', (req, res) => {
+  res.sendFile(path.join(__dirname, 'webapp', 'index.html'));
+});
+```
+
+### `npm test` passa ma il server non parte
+
+Verificare di avere aggiornato il repository. Il test di startup incluso nella versione corrente intercetta anche gli errori generati durante la registrazione delle rotte Express.
 
 ## Controlli automatici
 
 La repository usa GitHub Actions e Dependabot per tenere il codice sotto controllo:
 
-- `Node.js CI`: esegue `npm ci`, build se presente e `npm test` su push e pull request verso `main`;
+- `Node.js CI`: esegue `npm ci`, build se presente e `npm test` con Node.js 22 e 24 su push e pull request verso `main`;
 - `CodeQL`: analisi statica JavaScript per bug e problemi di sicurezza su push, pull request e ogni martedi mattina;
 - `Weekly Quality Check`: esegue test e `npm audit` ogni lunedi mattina;
 - `Dependabot`: apre pull request settimanali per aggiornamenti npm e GitHub Actions.
@@ -56,6 +119,12 @@ Per evitare chiamate a Overpass durante demo o sviluppo:
 
 ```bash
 USE_MOCK_OSM=true npm start
+```
+
+In PowerShell:
+
+```powershell
+$env:USE_MOCK_OSM='true'; npm start
 ```
 
 Di default l'app prova a usare Overpass reale.
